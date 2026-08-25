@@ -1,0 +1,10 @@
+playwright>=1.40
+PyYAML>=6.0
+
+# Resume parsing. Install what matches your CV format - all optional, and the
+# error message tells you which one you are missing.
+pdfplumber>=0.10        # .pdf
+python-docx>=1.1        # .docx
+
+# Spreadsheet export. Without it --scan still writes JSON, HTML and markdown.
+openpyxl>=3.1

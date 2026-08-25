@@ -1,0 +1,58 @@
+{
+    "title": "Naukri job search input",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "searches": {
+            "title": "Searches",
+            "type": "array",
+            "description": "Each entry is one navigation returning ~20 jobs. Breadth beats depth.",
+            "editor": "json",
+            "prefill": [
+                { "keyword": "Data Engineer", "location": "Bengaluru" },
+                { "keyword": "Backend Developer", "location": null }
+            ]
+        },
+        "includeRecommended": {
+            "title": "Include Naukri's recommendations",
+            "type": "boolean",
+            "description": "Needs a signed-in session. Ignored without one.",
+            "default": false
+        },
+        "postedWithinDays": {
+            "title": "Posted within N days",
+            "type": "integer",
+            "description": "1 = last 24 hours. Leave empty for no date filter.",
+            "editor": "number",
+            "minimum": 1,
+            "maximum": 90
+        },
+        "experienceYears": {
+            "title": "Your years of experience",
+            "type": "integer",
+            "description": "Passed to Naukri's own experience facet.",
+            "editor": "number",
+            "minimum": 0,
+            "maximum": 50
+        },
+        "sessionState": {
+            "title": "Naukri session (Playwright storage state)",
+            "type": "object",
+            "description": "The contents of your data/state.json. THIS IS YOUR LOGIN - it is stored in this actor's key-value store on Apify's infrastructure. Leave it empty to run signed out, which returns fewer fields and no recommendations.",
+            "editor": "json",
+            "isSecret": true
+        },
+        "proxy": {
+            "title": "Proxy",
+            "type": "object",
+            "description": "Datacenter IPs are blocked by Naukri's bot protection. Residential is the setting that works, and the expensive one.",
+            "editor": "proxy",
+            "default": {
+                "useApifyProxy": true,
+                "apifyProxyGroups": ["RESIDENTIAL"],
+                "apifyProxyCountry": "IN"
+            }
+        }
+    },
+    "required": []
+}

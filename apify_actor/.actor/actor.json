@@ -1,0 +1,19 @@
+{
+    "actorSpecification": 1,
+    "name": "naukri-search",
+    "title": "Naukri job search",
+    "description": "Runs Naukri keyword searches in a real browser and returns the raw listing payloads.",
+    "version": "1.0",
+    "meta": {
+        "templateId": "python-playwright"
+    },
+    "dockerfile": "../Dockerfile",
+    "input": "./input_schema.json",
+    "storages": {
+        "dataset": {
+            "actorSpecification": 1,
+            "title": "Naukri listings",
+            "description": "One record per job, exactly as Naukri's own search API returned it."
+        }
+    }
+}

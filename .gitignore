@@ -1,0 +1,55 @@
+# ---------------------------------------------------------------------------
+# Everything personal lives under data/ and never leaves your machine.
+#
+# state.json and linkedin_state.json ARE your logins - anyone holding them is
+# signed in as you. They are listed first so that stays impossible to miss.
+# ---------------------------------------------------------------------------
+data/
+!data/.gitkeep
+
+# Your resume, wherever it ended up.
+*.pdf
+*.docx
+*.doc
+resume/
+!profiles/
+
+# Your config. Only the example is tracked - it is the one with no facts in it.
+config.yaml
+config.local.yaml
+
+# Run output
+logs/
+*.xlsx
+*.log
+
+# Secrets
+.env
+.env.*
+!.env.example
+*token*
+!*token*.py
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

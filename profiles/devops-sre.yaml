@@ -1,0 +1,119 @@
+description: DevOps, SRE, platform and cloud infrastructure
+
+searches:
+  - DevOps Engineer
+  - Site Reliability Engineer
+  - Cloud Engineer
+  - Platform Engineer
+  - Infrastructure Engineer
+
+must_have_any:
+  - devops
+  - sre
+  - site reliability
+  - infrastructure
+  - cloud engineer
+  - platform engineer
+  - kubernetes
+  - ci/cd
+
+exclude_title_keywords:
+  - intern
+  - fresher
+  - trainee
+  - sales
+  - desktop support
+  - help desk
+
+synonyms:
+  sre: site reliability engineering
+  iac: infrastructure as code
+  k8s: kubernetes
+  eks: elastic kubernetes service
+  aks: azure kubernetes service
+  gke: google kubernetes engine
+  tf: terraform
+  cfn: cloudformation
+  o11y: observability
+
+vocabulary:
+  - Kubernetes
+  - Docker
+  - Helm
+  - Terraform
+  - Ansible
+  - Puppet
+  - Chef
+  - CloudFormation
+  - Pulumi
+  - AWS
+  - Azure
+  - GCP
+  - EC2
+  - S3
+  - Lambda
+  - VPC
+  - IAM
+  - Jenkins
+  - GitLab CI
+  - GitHub Actions
+  - Azure DevOps
+  - ArgoCD
+  - Flux
+  - Spinnaker
+  - CircleCI
+  - TeamCity
+  - Prometheus
+  - Grafana
+  - Datadog
+  - New Relic
+  - Splunk
+  - ELK
+  - Elasticsearch
+  - Logstash
+  - Kibana
+  - Loki
+  - Jaeger
+  - OpenTelemetry
+  - PagerDuty
+  - Linux
+  - Bash
+  - Shell Scripting
+  - Python
+  - Go
+  - Nginx
+  - Apache
+  - HAProxy
+  - Istio
+  - Envoy
+  - Service Mesh
+  - Vault
+  - Consul
+  - Kafka
+  - Redis
+  - PostgreSQL
+  - MySQL
+  - Git
+  - CI/CD
+  - GitOps
+  - SLO
+  - SLI
+  - Incident Management
+  - Disaster Recovery
+  - High Availability
+  - Load Balancing
+  - Autoscaling
+  - Cost Optimization
+  - Security
+  - Networking
+  - Agile
+
+seniority_terms:
+  - lead
+  - senior
+  - sr
+  - principal
+  - staff
+  - architect
+  - manager
+  - head

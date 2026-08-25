@@ -1,0 +1,113 @@
+description: Full stack web development, front and back of the same app
+
+searches:
+  - Full Stack Developer
+  - MERN Stack Developer
+  - Full Stack Engineer
+  - Java Full Stack Developer
+  - Python Full Stack Developer
+
+must_have_any:
+  - full stack
+  - fullstack
+  - mern
+  - mean
+  - web developer
+  - software engineer
+  - application developer
+
+exclude_title_keywords:
+  - intern
+  - fresher
+  - trainee
+  - sales
+  - wordpress
+  - graphic designer
+
+synonyms:
+  fullstack: full stack
+  full-stack: full stack
+  mern: mongodb express react node
+  mean: mongodb express angular node
+  nodejs: node js
+  node.js: node js
+  reactjs: react
+  react.js: react
+  nextjs: next js
+  express.js: express
+  js: javascript
+  ts: typescript
+
+vocabulary:
+  - JavaScript
+  - TypeScript
+  - React
+  - Angular
+  - Vue
+  - Next js
+  - Redux
+  - HTML
+  - CSS
+  - SASS
+  - Tailwind
+  - Bootstrap
+  - Node js
+  - Express
+  - NestJS
+  - Python
+  - Django
+  - Flask
+  - FastAPI
+  - Java
+  - Spring Boot
+  - PHP
+  - Laravel
+  - Ruby on Rails
+  - ASP.NET
+  - REST
+  - GraphQL
+  - WebSockets
+  - MongoDB
+  - PostgreSQL
+  - MySQL
+  - Redis
+  - Firebase
+  - Prisma
+  - Sequelize
+  - Mongoose
+  - Docker
+  - Kubernetes
+  - AWS
+  - Azure
+  - GCP
+  - Vercel
+  - Netlify
+  - Heroku
+  - Nginx
+  - CI/CD
+  - Jenkins
+  - GitHub Actions
+  - Git
+  - Jest
+  - Cypress
+  - Playwright
+  - Mocha
+  - Webpack
+  - Vite
+  - Microservices
+  - Authentication
+  - OAuth
+  - JWT
+  - Responsive Design
+  - Agile
+  - Scrum
+
+seniority_terms:
+  - lead
+  - senior
+  - sr
+  - principal
+  - staff
+  - architect
+  - manager
+  - head

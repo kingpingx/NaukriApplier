@@ -1,0 +1,109 @@
+description: Data engineering, ETL pipelines and data platforms
+
+searches:
+  - Data Engineer
+  - Big Data Engineer
+  - ETL Developer
+  - Data Platform Engineer
+  - Analytics Engineer
+
+must_have_any:
+  - data engineer
+  - data engineering
+  - etl
+  - elt
+  - data pipeline
+  - big data
+  - data warehouse
+  - analytics engineer
+  - data platform
+
+exclude_title_keywords:
+  - intern
+  - fresher
+  - trainee
+  - data entry
+  - sales
+  - data annotation
+
+synonyms:
+  etl: extract transform load
+  elt: extract load transform
+  dwh: data warehouse
+  adf: azure data factory
+  emr: elastic mapreduce
+  pyspark: spark
+  databricks: spark
+  bq: bigquery
+  gcs: google cloud storage
+
+vocabulary:
+  - Python
+  - Scala
+  - Java
+  - SQL
+  - Spark
+  - PySpark
+  - Hadoop
+  - Hive
+  - HDFS
+  - MapReduce
+  - Kafka
+  - Flink
+  - Storm
+  - Airflow
+  - Dagster
+  - Prefect
+  - Luigi
+  - dbt
+  - Snowflake
+  - Redshift
+  - BigQuery
+  - Databricks
+  - Synapse
+  - Delta Lake
+  - Iceberg
+  - Hudi
+  - PostgreSQL
+  - MySQL
+  - Oracle
+  - MongoDB
+  - Cassandra
+  - Elasticsearch
+  - AWS
+  - Glue
+  - Lambda
+  - S3
+  - EMR
+  - Azure
+  - Azure Data Factory
+  - GCP
+  - Dataflow
+  - Dataproc
+  - Terraform
+  - Docker
+  - Kubernetes
+  - CI/CD
+  - Git
+  - Data Modelling
+  - Dimensional Modelling
+  - Star Schema
+  - Data Governance
+  - Data Quality
+  - Data Lineage
+  - Streaming
+  - Batch Processing
+  - Power BI
+  - Tableau
+  - Looker
+  - Agile
+
+seniority_terms:
+  - lead
+  - senior
+  - sr
+  - principal
+  - staff
+  - architect
+  - manager
+  - head

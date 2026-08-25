@@ -1,0 +1,130 @@
+# Copy to config.yaml (or run `python main.py --setup`) and edit.
+#
+# Every key is optional. Anything left out is derived from your resume and, if
+# you extracted it, your live Naukri profile - so this file stays small and
+# does not go stale when you update either of them.
+#
+#   python main.py --check    show what this resolves to, no browser
+#   python main.py --scan     run it
+
+# --- who you are --------------------------------------------------------
+
+# A role pack from profiles/. It supplies the vocabulary, the "is this even my
+# field" gate, and sensible starting searches for a job family.
+#
+# LEAVE THIS NULL AND IT IS WORKED OUT FROM YOUR RESUME. You only need to set it
+# to override that - which is worth doing once you know which pack you want, so
+# that editing your resume cannot change it under you.
+#
+#   python main.py --roles              list them, and see which matches you
+#   python main.py --new-role "NAME"    scaffold one for a field with no pack
+role: null
+
+# Total years of experience. Only needed if your resume does not state it
+# plainly - `--resume` prints what it found.
+years: null
+
+# Added to whatever was parsed out of your resume. Use this for things your CV
+# words differently to how job postings do.
+skills: []
+  # - Playwright
+  # - Kubernetes
+
+# Per-skill years, quoted nowhere - used only to weight matching.
+skill_years: {}
+  # python: 4
+  # kubernetes: 2
+
+# --- what to search -----------------------------------------------------
+
+# Each search is one navigation returning ~20 jobs. Breadth beats depth: five
+# distinct queries return more usable jobs than paging five deep into one.
+# Leave empty and these are derived from your role pack and most recent title.
+# Add `pages: 2` to an entry to go deeper on a query that is working.
+searches: []
+  # - keyword: Backend Engineer
+  #   location: Pune
+  # - keyword: Python Developer
+  #   location: Bengaluru
+  # - keyword: Platform Engineer
+  #   location: null          # null = all of India
+  #   pages: 2
+
+# Defaults to your resume's location plus Remote.
+preferred_locations: []
+  # - Pune
+  # - Remote
+  # - Hybrid
+
+# A job must mention at least one of these somewhere or it is dropped before
+# scoring. Your role pack fills this in; anything here is added to it.
+must_have_any: []
+
+# Dropped on the title alone.
+exclude_title_keywords: []
+  # - intern
+  # - fresher
+  # - trainee
+
+# Dropped if the description mentions any of these. Useful for the things that
+# never show up in a title - unpaid work, bonds, mandatory relocation.
+exclude_description_keywords: []
+  # - service bond
+  # - unpaid
+
+# Companies you never want to hear from. Substring match, case-insensitive.
+exclude_companies: []
+
+# Drop anything paying below this, when a salary is stated at all. Most Naukri
+# postings state nothing, and those are never dropped by this.
+min_salary_lpa: null
+
+# Only listings posted in the last N days. 1 = last 24 hours.
+posted_within_days: null
+
+# --- thresholds ---------------------------------------------------------
+
+# Scoring is 0-100. See screener/score.py for the breakdown.
+auto_apply_min_score: 72    # goes on the shortlist at or above this
+review_min_score: 55        # worth a read at or above this
+daily_target: 50            # how many jobs to keep per run
+
+# Drop jobs asking for more than this many years beyond your experience.
+max_experience_gap_years: 2.0
+
+# Include Naukri's own recommendations for your profile alongside the searches.
+# Needs a logged-in session.
+include_recommended: true
+
+# --- scoring weights ----------------------------------------------------
+
+# The default 45/25/15/10/5 split, renormalised to 100 whatever you put here.
+# Set location to 0 if you will move anywhere; raise title if you only want a
+# step up rather than a sideways move.
+weights: {}
+  # skills: 45
+  # title: 25
+  # experience: 15
+  # location: 10
+  # freshness: 5
+
+# Spellings to fold together before matching, on top of your role pack's.
+synonyms: {}
+  # rn: react native
+
+# --- where listings come from -------------------------------------------
+
+# local  Playwright on this machine, with your saved session. The default.
+#        Needs nothing but a pip install.
+# apify  An Apify actor doing the same navigation in the cloud. Needs an
+#        account, a token, and your Naukri session uploaded there.
+#        Read docs/apify.md first - it is not a cheap HTTP scraper, and the
+#        session upload is a real trade-off.
+source: local
+
+apify: {}
+  # token: apify_api_...        # or set APIFY_TOKEN in your environment
+  # actor: your-name/naukri-search
+  # country: IN
+  # timeout_sec: 900
+  # upload_session: true        # false runs signed out - fewer results

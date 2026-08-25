@@ -1,0 +1,111 @@
+description: Frontend, UI and web application engineering
+
+searches:
+  - Frontend Developer
+  - React Developer
+  - UI Developer
+  - Angular Developer
+  - Software Engineer Frontend
+
+must_have_any:
+  - frontend
+  - front end
+  - ui developer
+  - web developer
+  - react
+  - angular
+  - vue
+  - full stack
+
+exclude_title_keywords:
+  - intern
+  - fresher
+  - trainee
+  - sales
+  - graphic designer
+  - wordpress
+
+synonyms:
+  fe: frontend
+  front-end: frontend
+  front end: frontend
+  reactjs: react
+  react.js: react
+  angularjs: angular
+  vuejs: vue
+  vue.js: vue
+  nextjs: next js
+  next.js: next js
+  js: javascript
+  ts: typescript
+  css3: css
+  html5: html
+  ui/ux: ui ux
+
+vocabulary:
+  - JavaScript
+  - TypeScript
+  - React
+  - Redux
+  - Next js
+  - Angular
+  - RxJS
+  - Vue
+  - Nuxt
+  - Svelte
+  - HTML
+  - CSS
+  - SASS
+  - SCSS
+  - LESS
+  - Tailwind
+  - Bootstrap
+  - Material UI
+  - Styled Components
+  - Webpack
+  - Vite
+  - Rollup
+  - Babel
+  - ESLint
+  - Prettier
+  - Jest
+  - Vitest
+  - React Testing Library
+  - Cypress
+  - Playwright
+  - Storybook
+  - Node js
+  - Express
+  - GraphQL
+  - Apollo
+  - REST
+  - Axios
+  - Responsive Design
+  - Accessibility
+  - WCAG
+  - Cross Browser
+  - Performance Optimization
+  - Lighthouse
+  - Web Vitals
+  - PWA
+  - Service Workers
+  - WebSockets
+  - Micro Frontend
+  - Module Federation
+  - Figma
+  - Git
+  - CI/CD
+  - Agile
+  - Scrum
+  - SEO
+  - i18n
+
+seniority_terms:
+  - lead
+  - senior
+  - sr
+  - principal
+  - staff
+  - architect
+  - manager
+  - head

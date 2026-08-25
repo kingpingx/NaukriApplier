@@ -1,0 +1,118 @@
+description: Backend, server-side and API engineering
+
+searches:
+  - Backend Developer
+  - Software Engineer Backend
+  - API Developer
+  - Microservices Developer
+  - Java Developer
+
+must_have_any:
+  - backend
+  - back end
+  - server side
+  - api
+  - microservices
+  - software engineer
+  - software developer
+  - full stack
+
+exclude_title_keywords:
+  - intern
+  - fresher
+  - trainee
+  - sales
+  - support engineer
+  - network engineer
+
+synonyms:
+  be: backend
+  back-end: backend
+  back end: backend
+  restful: rest
+  api development: api
+  springboot: spring boot
+  nodejs: node js
+  node.js: node js
+  dotnet: net
+  ".net": net
+  golang: go
+  postgres: postgresql
+  mongo: mongodb
+
+vocabulary:
+  - Java
+  - Spring
+  - Spring Boot
+  - Hibernate
+  - Python
+  - Django
+  - Flask
+  - FastAPI
+  - Node js
+  - Express
+  - NestJS
+  - Go
+  - Rust
+  - C#
+  - ASP.NET
+  - PHP
+  - Laravel
+  - Ruby
+  - Rails
+  - Scala
+  - Kotlin
+  - REST
+  - GraphQL
+  - gRPC
+  - SOAP
+  - Microservices
+  - Monolith
+  - Event Driven
+  - Kafka
+  - RabbitMQ
+  - ActiveMQ
+  - Redis
+  - Memcached
+  - PostgreSQL
+  - MySQL
+  - Oracle
+  - SQL Server
+  - MongoDB
+  - Cassandra
+  - DynamoDB
+  - Elasticsearch
+  - Docker
+  - Kubernetes
+  - AWS
+  - Azure
+  - GCP
+  - Terraform
+  - Jenkins
+  - GitHub Actions
+  - CI/CD
+  - Git
+  - Maven
+  - Gradle
+  - JUnit
+  - PyTest
+  - Agile
+  - Scrum
+  - System Design
+  - Distributed Systems
+  - Caching
+  - Load Balancing
+  - OAuth
+  - JWT
+  - Nginx
+  - Linux
+
+seniority_terms:
+  - lead
+  - senior
+  - sr
+  - principal
+  - staff
+  - architect
+  - manager
+  - head

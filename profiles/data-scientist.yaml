@@ -1,0 +1,113 @@
+description: Data science, machine learning and applied analytics
+
+searches:
+  - Data Scientist
+  - Machine Learning Engineer
+  - Data Analyst
+  - MLOps Engineer
+  - AI Engineer
+
+must_have_any:
+  - data scientist
+  - data science
+  - machine learning
+  - data analyst
+  - analytics
+  - artificial intelligence
+  - deep learning
+  - mlops
+  - nlp
+
+exclude_title_keywords:
+  - intern
+  - fresher
+  - trainee
+  - data entry
+  - sales
+  - data annotation
+  - labelling
+
+synonyms:
+  ml: machine learning
+  dl: deep learning
+  nlp: natural language processing
+  cv: computer vision
+  ai: artificial intelligence
+  llm: large language model
+  eda: exploratory data analysis
+  sklearn: scikit learn
+  scikit-learn: scikit learn
+  tf: tensorflow
+
+vocabulary:
+  - Python
+  - R
+  - SQL
+  - Scala
+  - Julia
+  - Pandas
+  - NumPy
+  - SciPy
+  - Scikit Learn
+  - TensorFlow
+  - PyTorch
+  - Keras
+  - XGBoost
+  - LightGBM
+  - CatBoost
+  - Statsmodels
+  - Hugging Face
+  - Transformers
+  - LangChain
+  - OpenCV
+  - NLTK
+  - spaCy
+  - Spark
+  - PySpark
+  - Databricks
+  - Airflow
+  - MLflow
+  - Kubeflow
+  - DVC
+  - Weights and Biases
+  - SageMaker
+  - Vertex AI
+  - Azure ML
+  - Docker
+  - Kubernetes
+  - FastAPI
+  - Flask
+  - Streamlit
+  - Tableau
+  - Power BI
+  - Looker
+  - Matplotlib
+  - Seaborn
+  - Plotly
+  - Statistics
+  - Hypothesis Testing
+  - A/B Testing
+  - Regression
+  - Classification
+  - Clustering
+  - Time Series
+  - Forecasting
+  - Recommendation Systems
+  - Feature Engineering
+  - Model Deployment
+  - Model Monitoring
+  - Snowflake
+  - BigQuery
+  - Redshift
+  - Git
+  - Agile
+
+seniority_terms:
+  - lead
+  - senior
+  - sr
+  - principal
+  - staff
+  - architect
+  - manager
+  - head

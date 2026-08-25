@@ -1,0 +1,208 @@
+"""The scan: collect listings, score them, write the results out.
+
+    gather   ask the configured source for listings
+    filter   drop what the ledger has already shown you
+    score    rank what is left against your facts
+    write    results.json, a ranked .xlsx, and a report you can read
+
+Nothing here applies to anything. This tool finds and ranks jobs; the decision
+to apply, and the application itself, stay with you. That is a deliberate line -
+an unattended bot answering a recruiter's screening questions is inventing
+answers in your name, and no ranking is worth that.
+"""
+from __future__ import annotations
+
+import json
+import logging
+from datetime import date, datetime
+from pathlib import Path
+
+from . import score as score_mod
+from .config import ConfigError
+from .ledger import Ledger
+from .paths import JOBS_DIR
+from .sources import get_source
+
+log = logging.getLogger("screener.scan")
+
+
+def run(config: dict, *, refresh: bool = False, limit: int | None = None) -> dict:
+    """Collect, score and rank. Returns a summary dict; writes nothing yet."""
+    JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    ledger = Ledger()
+
+    source = get_source(config)
+    log.info("Collecting listings via %s", source.name)
+    jobs = source.gather(config)
+
+    if not jobs:
+        return {
+            "at": datetime.now().isoformat(timespec="seconds"),
+            "source": source.name,
+            "collected": 0, "seen_before": 0, "rejected": 0,
+            "shortlist": [], "review": [], "dropped": [],
+            "searches": config.get("searches") or [],
+        }
+
+    seen_before = 0
+    scored, rejected = [], []
+    for job in jobs:
+        # `refresh` re-scores everything, which is what you want after editing
+        # your config - otherwise yesterday's ledger hides the jobs whose score
+        # just changed.
+        if not refresh and ledger.seen(job.job_id):
+            seen_before += 1
+            continue
+        breakdown = score_mod.score(job, config)
+        (rejected if "rejected" in breakdown else scored).append(job)
+
+    scored.sort(key=lambda j: j.score, reverse=True)
+    if limit:
+        scored = scored[:limit]
+
+    strong_at = float(config.get("auto_apply_min_score", 72))
+    review_at = float(config.get("review_min_score", 55))
+
+    shortlist = [j for j in scored if j.score >= strong_at]
+    review = [j for j in scored if review_at <= j.score < strong_at]
+    dropped = [j for j in scored if j.score < review_at]
+
+    target = int(config.get("daily_target", 50))
+    shortlist = shortlist[:target]
+    review = review[:max(0, target - len(shortlist))]
+
+    for job in shortlist + review:
+        ledger.record(job, "shortlisted" if job.score >= strong_at else "review",
+                      score_mod.explain(job))
+    for job in rejected:
+        ledger.record(job, "dropped", score_mod.explain(job))
+    ledger.save()
+
+    return {
+        "at": datetime.now().isoformat(timespec="seconds"),
+        "source": source.name,
+        "collected": len(jobs),
+        "seen_before": seen_before,
+        "rejected": len(rejected),
+        "shortlist": [j.to_dict() | {"score": j.score, "why": score_mod.explain(j)} for j in shortlist],
+        "review": [j.to_dict() | {"score": j.score, "why": score_mod.explain(j)} for j in review],
+        "dropped": [j.to_dict() | {"score": j.score, "why": score_mod.explain(j)} for j in dropped[:40]],
+        "searches": config.get("searches") or [],
+        "_jobs": shortlist + review,   # live objects, stripped before serialising
+    }
+
+
+def write(summary: dict, config: dict, *, excel: bool = True, html: bool = True) -> dict[str, Path]:
+    """Persist the scan. Returns {kind: path} for whatever was written."""
+    JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    today = date.today().isoformat()
+    written: dict[str, Path] = {}
+
+    jobs = summary.pop("_jobs", [])
+
+    results_path = JOBS_DIR / f"results-{today}.json"
+    results_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False, default=str),
+                            encoding="utf-8")
+    written["results"] = results_path
+
+    if excel and jobs:
+        try:
+            from .export import to_excel
+            path = JOBS_DIR / f"job-matches-{today}.xlsx"
+            to_excel(jobs, path, Ledger())
+            written["excel"] = path
+        except ImportError:
+            log.info("openpyxl not installed - skipping the spreadsheet. pip install openpyxl")
+        except Exception as exc:
+            log.warning("Could not write the spreadsheet: %s", exc)
+
+    if html and jobs:
+        try:
+            from . import page as page_mod
+            path = page_mod.build({"shortlist": summary["shortlist"],
+                                   "review": summary["review"]},
+                                  JOBS_DIR / f"openings-{today}.html", today)
+            written["html"] = Path(path)
+        except Exception as exc:
+            log.warning("Could not write the HTML page: %s", exc)
+
+    report_path = JOBS_DIR / f"report-{today}.md"
+    report_path.write_text(report(summary, config), encoding="utf-8")
+    written["report"] = report_path
+
+    summary["_jobs"] = jobs
+    return written
+
+
+def report(summary: dict, config: dict) -> str:
+    """A markdown report: what was searched, what scored, and why."""
+    lines = [
+        f"# Job scan - {summary.get('at', '')[:16].replace('T', ' ')}",
+        "",
+        f"- source: `{summary.get('source')}`",
+        f"- collected: {summary.get('collected')}",
+        f"- already in the ledger: {summary.get('seen_before')}",
+        f"- hard-rejected: {summary.get('rejected')}",
+        f"- shortlist: {len(summary.get('shortlist') or [])}",
+        f"- review: {len(summary.get('review') or [])}",
+        "",
+        "## Searches run",
+        "",
+    ]
+    for entry in summary.get("searches") or []:
+        lines.append(f"- `{entry.get('keyword')}` in {entry.get('location') or 'all India'}")
+
+    for heading, key in (("Shortlist", "shortlist"), ("Worth a read", "review")):
+        rows = summary.get(key) or []
+        if not rows:
+            continue
+        lines += ["", f"## {heading}", ""]
+        for job in rows:
+            lines.append(f"### {job.get('score')}  {job.get('title')} - {job.get('company')}")
+            location = job.get("location") or "-"
+            experience = job.get("experience_label") or "-"
+            salary = job.get("salary_label") or "not stated"
+            lines.append(f"{location} | {experience} | {salary} | {job.get('posted_label') or ''}")
+            if job.get("company_apply"):
+                lines.append("Applies on the company's own site.")
+            if job.get("has_questionnaire"):
+                lines.append("Opens a screening questionnaire.")
+            lines.append(f"`{job.get('why')}`")
+            lines.append(f"<{job.get('url')}>")
+            lines.append("")
+
+    dropped = summary.get("dropped") or []
+    if dropped:
+        lines += ["", "## Scored too low", ""]
+        for job in dropped[:25]:
+            lines.append(f"- {job.get('score')} {job.get('title')} - {job.get('company')} | `{job.get('why')}`")
+
+    return "\n".join(lines) + "\n"
+
+
+def summarise(summary: dict, written: dict[str, Path] | None = None) -> str:
+    shortlist = summary.get("shortlist") or []
+    review = summary.get("review") or []
+    lines = [
+        "",
+        f"  Collected {summary.get('collected')} listings via {summary.get('source')}.",
+        f"    {summary.get('seen_before')} already seen, {summary.get('rejected')} rejected outright.",
+        "",
+        f"  Shortlist:    {len(shortlist)}",
+        f"  Worth a read: {len(review)}",
+        "",
+    ]
+    for job in shortlist[:10]:
+        lines.append(f"    {job.get('score'):>5}  {(job.get('title') or '')[:44]:<44}  {(job.get('company') or '')[:26]}")
+    if len(shortlist) > 10:
+        lines.append(f"           ... and {len(shortlist) - 10} more")
+    if not shortlist and not review:
+        lines.append("    Nothing cleared the thresholds. Lower `review_min_score` in")
+        lines.append("    config.yaml, or widen `searches:`.")
+
+    if written:
+        lines.append("")
+        for kind, path in written.items():
+            lines.append(f"  {kind:<8} {path}")
+    lines.append("")
+    return "\n".join(lines)
