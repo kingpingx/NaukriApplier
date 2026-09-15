@@ -34,6 +34,7 @@ PROFILE_JSON = HOME / "profile.json"
 PROFILE_TXT = HOME / "profile.txt"
 PROFILE_PNG = HOME / "profile.png"
 RESUME_JSON = HOME / "resume.json"        # parsed resume facts
+REFRESH_STATE = HOME / "refresh.json"     # what --refresh-profile last changed
 
 JOBS_DIR = HOME / "jobs"
 LEDGER_PATH = JOBS_DIR / "ledger.json"

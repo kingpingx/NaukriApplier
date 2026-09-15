@@ -23,6 +23,7 @@ from screener import match as match_mod
 from screener import notify as notify_mod
 from screener import page as page_mod
 from screener import projects as projects_mod
+from screener import refresh as refresh_mod
 from screener import resume as resume_mod
 from screener import scan as scan_mod
 from screener import schedule as schedule_mod
@@ -738,6 +739,97 @@ class TestSchedule:
         unit = schedule_mod.service_unit(Path("/repo"), "/repo/.venv/bin/python")
         assert "WorkingDirectory=/repo" in unit
         assert '"/repo/main.py" --scan --notify' in unit
+
+    def test_refresh_service_runs_a_hidden_notifying_refresh(self):
+        unit = schedule_mod.service_unit(Path("/repo"), "/repo/.venv/bin/python", job="refresh")
+        assert '"/repo/main.py" --refresh-profile --headless --notify' in unit
+
+    def test_only_the_refresh_starts_at_a_varying_minute(self):
+        assert "RandomizedDelaySec=20m" in schedule_mod.timer_unit(["09:30"], job="refresh")
+        assert "RandomizedDelaySec" not in schedule_mod.timer_unit(["09:30"])
+
+    def test_windows_task_runs_daily_on_your_desktop_and_catches_up(self):
+        xml = schedule_mod.task_xml(["09:30", "18:00"], "refresh", Path("repo"), "python.exe")
+        assert "T09:30:00</StartBoundary>" in xml and "T18:00:00</StartBoundary>" in xml
+        assert xml.count("<DaysInterval>1</DaysInterval>") == 2
+        for part in ("<StartWhenAvailable>true", "<LogonType>InteractiveToken",
+                     "<RandomDelay>PT20M", "<Command>python.exe</Command>",
+                     f"<WorkingDirectory>{Path('repo')}</WorkingDirectory>",
+                     "--refresh-profile --headless --notify</Arguments>"):
+            assert part in xml
+
+    def test_windows_install_hands_schtasks_a_utf16_definition(self, monkeypatch):
+        calls, xmls = [], []
+
+        def run(command, **_kw):
+            calls.append(command)
+            if "/XML" in command:
+                xmls.append(Path(command[command.index("/XML") + 1]).read_text(encoding="utf-16"))
+            return SimpleNamespace(returncode=0, stdout="TaskName: \\naukri-refresh", stderr="")
+
+        monkeypatch.setattr(schedule_mod, "_windows", lambda: True)
+        monkeypatch.setattr(schedule_mod.shutil, "which", lambda name: name)
+        monkeypatch.setattr(schedule_mod.subprocess, "run", run)
+        schedule_mod.install(["09:30"], job="refresh")
+        create = next(c for c in calls if "/Create" in c)
+        assert create[create.index("/TN") + 1] == "naukri-refresh"
+        assert "<StartWhenAvailable>true" in xmls[0]
+
+
+class TestRefreshPlan:
+    """The daily refresh may only take back what it put there itself."""
+
+    POOL = ["Docker", "Jenkins"]
+    HEADLINE = "Backend engineer - C#, .NET, Azure"
+
+    def test_the_skill_it_added_comes_off_the_next_day(self):
+        todo = refresh_mod.plan(["C#", "Docker"], self.HEADLINE, self.POOL,
+                                {"added_skill": "Docker"})
+        assert todo["skill"] == ("remove", "Docker")
+
+    def test_a_pool_skill_you_listed_yourself_is_never_removed(self):
+        todo = refresh_mod.plan(["C#", "Docker"], self.HEADLINE, self.POOL, {})
+        assert todo["skill"] == ("add", "Jenkins")
+
+    def test_the_pool_rotates_after_a_removal(self):
+        todo = refresh_mod.plan(["C#"], self.HEADLINE, self.POOL,
+                                {"added_skill": None, "last_skill": "Docker"})
+        assert todo["skill"] == ("add", "Jenkins")
+
+    def test_a_pool_already_listed_is_a_problem_not_a_removal(self):
+        todo = refresh_mod.plan(["C#", "docker", "Jenkins"], self.HEADLINE, self.POOL, {})
+        assert todo["skill"] is None and todo["problems"]
+        assert todo["headline"] == self.HEADLINE + ".", "the headline still goes ahead"
+
+    def test_the_only_chip_is_never_removed(self):
+        todo = refresh_mod.plan(["Docker"], self.HEADLINE, self.POOL, {"added_skill": "Docker"})
+        assert todo["skill"] is None and todo["problems"]
+
+    def test_the_headline_full_stop_flips_both_ways(self):
+        assert refresh_mod.headline_toggled("Backend engineer") == "Backend engineer."
+        assert refresh_mod.headline_toggled("Backend engineer. ") == "Backend engineer"
+
+    def test_a_full_length_headline_is_left_alone(self):
+        todo = refresh_mod.plan(["C#"], "x" * 250, [], {})
+        assert todo["headline"] is None and "250-character" in todo["notes"][0]
+
+    def test_a_missing_full_stop_is_not_a_save(self):
+        sent = "Backend engineer with nine years of C#, .NET and Azure."
+        assert edit_mod._saved_ok(sent, sent[:-1]), "the lenient check would pass it"
+        assert not refresh_mod.headline_saved(sent, sent[:-1])
+        assert refresh_mod.headline_saved(sent, "  " + sent.upper())
+
+    def test_the_pool_reads_a_list_or_a_comma_separated_string(self):
+        assert refresh_mod.pool_from("Docker, jenkins,docker") == ["Docker", "jenkins"]
+        assert refresh_mod.pool_from(None) == []
+
+    def test_check_reports_a_failed_refresh(self, tmp_path):
+        path = tmp_path / "refresh.json"
+        path.write_text('{"last_run": "2026-09-16T09:41:00", "ok": false, '
+                        '"error": "Not logged in\\nmore"}', encoding="utf-8")
+        line = refresh_mod.status_line(path)
+        assert "FAILED: Not logged in" in line and "--login" in line
+        assert refresh_mod.status_line(tmp_path / "none.json") is None
 
 
 class TestNotify:

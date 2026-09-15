@@ -319,9 +319,50 @@ instead of quietly finding nothing.
   jobs the earlier ones had not shown you.
 - Output of scheduled runs: `journalctl --user -u naukri-scan`.
 
-On Windows or macOS no timer is installed for you: point Task Scheduler or
-launchd at `python main.py --scan --notify` in the repo folder, for a logged-in
-session.
+On Windows the same command creates a Task Scheduler task instead (`naukri-scan`,
+visible in Task Scheduler). It runs only while you are logged in, and a run
+missed while the PC slept starts when it wakes. Desktop pop-ups are Linux-only,
+so on Windows check `logs/screener.log`. On macOS no timer is installed for
+you: point launchd at `python main.py --scan --notify` in the repo folder.
+
+### Keep your profile fresh
+
+Naukri shows recruiters when a profile was last updated, and recent profiles
+rank higher in their searches. This makes one small, real edit a day so yours
+always reads as current:
+
+```yaml
+# config.yaml
+refresh_skills: [SignalR, WebSockets]   # skills you really have, not yet listed
+refresh_headline: true              # the default
+```
+
+```bash
+python main.py --refresh-profile --dry-run   # show today's change, write nothing
+python main.py --refresh-profile             # make it
+python main.py --schedule-refresh 09:30      # every day (Task Scheduler or systemd)
+python main.py --unschedule-refresh
+```
+
+Each run makes two saves in one minimized browser:
+
+- **Key skill.** One skill from `refresh_skills` goes on, and the next run takes
+  it back off. The runs after that work through the rest of the list. It only
+  ever removes a chip it added itself (`data/refresh.json` remembers which one),
+  so skills you listed by hand are never touched. List only skills you have: a
+  recruiter filtering on one will find you on the days it is showing.
+- **Headline.** A full stop at the end is added, then removed the next day.
+
+Both are checked by reading the page back. If one fails, the other still runs.
+The scheduled run starts at a slightly different minute each day, within 20
+minutes of the time you gave.
+
+It uses your saved login, which lasts a few weeks. `python main.py --check`
+shows how the last refresh went. When it says the login expired, run `--login`
+again.
+
+Naukri's terms of use do not allow automated tools on the site, and this one
+edits your live profile every day. Using it is your call, at your own risk.
 
 ## Where jobs come from
 

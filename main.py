@@ -6,6 +6,8 @@
     python main.py --login              sign in to Naukri once, save the session
     python main.py --extract            read your live Naukri profile (optional)
     python main.py --upload-resume      replace the resume on your Naukri profile
+    python main.py --refresh-profile    one small edit so your profile reads as updated
+    python main.py --schedule-refresh   do that every day (09:30 unless you give a time)
     python main.py --match JOB_URL      check one opening; fix your profile to match
     python main.py --schedule TIMES     scan daily at those times, e.g. 09:00,18:00
     python main.py --scan               search, score, rank, write the results
@@ -281,6 +283,25 @@ def cmd_check() -> int:
                        "    Set `years:` in config.yaml.")
     if missing:
         print("\n".join(missing) + "\n")
+    from screener import refresh as refresh_mod
+    status = refresh_mod.status_line()
+    if status:
+        print(status + "\n")
+    return 0
+
+
+def cmd_refresh(dry_run: bool, headless: bool, notify: bool) -> int:
+    """Toggle one key skill and the headline's full stop, so the profile reads as updated."""
+    from screener import refresh as refresh_mod
+    paths.ensure()
+    pool = refresh_mod.pool_from(_config_value("refresh_skills"))
+    toggle_headline = _config_value("refresh_headline")
+    result = refresh_mod.run(pool, toggle_headline=toggle_headline is not False,
+                             headless=headless, dry_run=dry_run)
+    print(refresh_mod.summarise(result))
+    if result["errors"] and not dry_run:
+        return _fail("Profile refresh: " + "; ".join(result["errors"]), 2, notify,
+                     title=REFRESH_FAILED)
     return 0
 
 
@@ -310,22 +331,31 @@ def cmd_scan(args) -> int:
     return 0
 
 
-def cmd_schedule(times_text: str) -> int:
+def cmd_schedule(times_text: str, job: str = "scan") -> int:
     from screener import schedule as schedule_mod
     times = schedule_mod.parse_times(times_text)
-    upcoming = schedule_mod.install(times)
-    print(f"\n  Scans scheduled daily at {', '.join(times)}.\n")
+    upcoming = schedule_mod.install(times, job=job)
+    what = "Profile refreshes" if job == "refresh" else "Scans"
+    print(f"\n  {what} scheduled daily at {', '.join(times)}.\n")
     print("\n".join("  " + line for line in upcoming.strip().splitlines()))
-    print("\n  Each scan pops up a notification when it starts, finishes or fails.\n"
-          "  They run only while you are logged in - the browser needs your display.\n"
-          "  Change the times by running --schedule again; remove with --unschedule.\n")
+    if job == "refresh":
+        print("\n  Each run starts within 20 minutes of that time, in a minimized browser.\n"
+              "  `python main.py --check` shows how the last one went - an expired login\n"
+              "  stops it until you run --login again.\n"
+              "  They run only while you are logged in - the browser needs your display.\n"
+              "  Change the time with --schedule-refresh again; remove with --unschedule-refresh.\n")
+    else:
+        print("\n  Each scan pops up a notification when it starts, finishes or fails.\n"
+              "  They run only while you are logged in - the browser needs your display.\n"
+              "  Change the times by running --schedule again; remove with --unschedule.\n")
     return 0
 
 
-def cmd_unschedule() -> int:
+def cmd_unschedule(job: str = "scan") -> int:
     from screener import schedule as schedule_mod
-    print("\n  Scheduled scans removed.\n" if schedule_mod.remove()
-          else "\n  No scheduled scans were installed.\n")
+    what = "profile refreshes" if job == "refresh" else "scans"
+    print(f"\n  Scheduled {what} removed.\n" if schedule_mod.remove(job)
+          else f"\n  No scheduled {what} were installed.\n")
     return 0
 
 
@@ -337,18 +367,23 @@ def _expected_errors() -> tuple[type[Exception], ...]:
     """
     from screener.edit import EditError
     from screener.match import MatchError
+    from screener.refresh import RefreshError
     from screener.schedule import ScheduleError
     from screener.session import NotLoggedIn
     from screener.sources import SourceError
     return (upload_mod.UploadError, resume_mod.ResumeError, config_mod.ConfigError,
-            NotLoggedIn, SourceError, MatchError, EditError, ScheduleError)
+            NotLoggedIn, SourceError, MatchError, EditError, ScheduleError, RefreshError)
 
 
-def _fail(message: str, code: int, notify: bool) -> int:
+SCAN_FAILED = "Naukri scan failed"
+REFRESH_FAILED = "Naukri profile refresh failed"
+
+
+def _fail(message: str, code: int, notify: bool, title: str = SCAN_FAILED) -> int:
     """Print a failure - and with --notify pop it up, since nobody is watching."""
     print(f"\n  {message}\n")
     if notify:
-        notify_mod.send("Naukri scan failed", message, critical=True)
+        notify_mod.send(title, message, critical=True)
     return code
 
 
@@ -374,7 +409,16 @@ def main() -> int:
     parser.add_argument("--as-name", dest="as_name", metavar="FILENAME",
                         help="Upload under this filename - recruiters see it")
     parser.add_argument("--dry-run", action="store_true", dest="dry_run",
-                        help="With --upload-resume: show what would change, upload nothing")
+                        help="With --upload-resume or --refresh-profile: show what would "
+                             "change, write nothing")
+    action.add_argument("--refresh-profile", action="store_true", dest="refresh_profile",
+                        help="Toggle one key skill and the headline's full stop, so the "
+                             "profile reads as updated today")
+    action.add_argument("--schedule-refresh", dest="schedule_refresh", nargs="?",
+                        const="09:30", metavar="TIME",
+                        help="Run --refresh-profile daily at TIME (default 09:30)")
+    action.add_argument("--unschedule-refresh", action="store_true", dest="unschedule_refresh",
+                        help="Remove the scheduled profile refresh")
     action.add_argument("--check", action="store_true", help="Print the effective config and exit")
     action.add_argument("--scan", action="store_true", help="Search, score and rank today's jobs")
     action.add_argument("--schedule", metavar="TIMES",
@@ -423,6 +467,12 @@ def main() -> int:
             return cmd_schedule(args.schedule)
         if args.unschedule:
             return cmd_unschedule()
+        if args.schedule_refresh:
+            return cmd_schedule(args.schedule_refresh, job="refresh")
+        if args.unschedule_refresh:
+            return cmd_unschedule("refresh")
+        if args.refresh_profile:
+            return cmd_refresh(args.dry_run, args.headless, args.notify)
 
         if args.login:
             from screener import session as session_mod
@@ -446,10 +496,11 @@ def main() -> int:
         print("\n  Stopped.\n")
         return 130
     except Exception as exc:
+        title = REFRESH_FAILED if args.refresh_profile else SCAN_FAILED
         if isinstance(exc, _expected_errors()):
-            return _fail(str(exc), 2, args.notify)
+            return _fail(str(exc), 2, args.notify, title)
         logging.getLogger("screener").exception("Unhandled error")
-        return _fail(f"Error: {exc}\n  See logs/screener.log", 1, args.notify)
+        return _fail(f"Error: {exc}\n  See logs/screener.log", 1, args.notify, title)
 
     return 0
 

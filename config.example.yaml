@@ -167,3 +167,17 @@ apify: {}
   # country: IN
   # timeout_sec: 900
   # upload_session: true        # false runs signed out - fewer results
+
+# --- daily profile refresh ----------------------------------------------
+
+# `python main.py --refresh-profile` makes one small edit so Naukri shows your
+# profile as updated today; `--schedule-refresh 09:30` runs it every day.
+# It adds one of these skills, and the next run takes it back off. List skills
+# you really have but have not put on your profile - it never removes a chip
+# it did not add itself.
+refresh_skills: []
+  # - SignalR
+  # - WebSockets
+
+# Also add or remove a full stop at the end of your resume headline.
+refresh_headline: true

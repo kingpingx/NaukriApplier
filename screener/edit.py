@@ -343,6 +343,56 @@ def add_key_skills(page, skills: list[str]) -> dict:
     return {"field": "key_skills", "before": before, "after": after, "skipped": skipped}
 
 
+def remove_key_skill(page, skill: str) -> dict:
+    """Remove the one chip reading exactly `skill`, and keep every other.
+
+    The daily refresh uses this to take back a skill it added itself. Nothing
+    is saved unless that exact chip was found and clicked, so the worst case is
+    a run that changes nothing - never one that clears the list.
+    """
+    editor = S.EDITORS["key_skills"]
+
+    reveal(page)
+    before = _page_chips(page)
+    if _exact_index(before, skill) is None:
+        return {"field": "key_skills", "before": before, "after": before, "skipped": [skill]}
+    if len(before) < 2:
+        raise EditError(f"{skill} is your only key skill - removing it would leave "
+                        "the list empty, so nothing was changed.")
+
+    _click_first(page, editor["trigger"], "key skills edit")
+    page.wait_for_timeout(1500)
+
+    # The label, not the chip's own text: the close icon is a material-icons
+    # ligature, so every chip's inner text ends in the word "close".
+    chips = page.locator(S.SKILL_CHIP)
+    labels = []
+    for i in range(chips.count()):
+        label = chips.nth(i).locator(S.SKILL_CHIP_LABEL)
+        labels.append(label.first.inner_text(timeout=3000) if label.count() else "")
+    index = _exact_index(labels, skill)
+    if index is None:
+        page.keyboard.press("Escape")
+        raise EditError(f"Could not find the {skill} chip in the key-skills dialog. "
+                        "Nothing was changed.")
+
+    chips.nth(index).locator(S.SKILL_CHIP_REMOVE).first.click(timeout=4000)
+    page.wait_for_timeout(400)
+    _click_first(page, editor["save"], "key skills save")
+    _settle(page)
+
+    after = _page_chips(page)
+    if _exact_index(after, skill) is not None:
+        raise EditError(f"{skill} is still on your key skills after saving - "
+                        "the removal did not land.")
+    lost = [c for c in before if c not in after and _exact_index([c], skill) is None]
+    if lost:
+        raise EditError(f"Removed {skill}, but these chips went with it: "
+                        f"{', '.join(lost)}. Re-add them on the site.")
+    log.info("Key skills: removed %s, now %d chips", skill, len(after))
+    return {"field": "key_skills", "before": before, "after": after, "skipped": []}
+
+
 def _add_chips(page, editor: dict, skills: list[str]) -> tuple[list[str], list[str]]:
     """Type each skill into the open dialog and click Naukri's suggestion for it.
 

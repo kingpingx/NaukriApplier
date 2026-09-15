@@ -64,6 +64,10 @@ DEFAULTS = {
     "weworkremotely": {},          # categories: which RSS feeds to read
     "apify": {},                   # token, actor, proxy - see docs/apify.md
 
+    # --- daily profile refresh - see screener/refresh.py -----------------
+    "refresh_skills": [],          # real skills of yours it may add and take back
+    "refresh_headline": True,      # also flip the headline's trailing full stop
+
     # --- scoring ---------------------------------------------------------
     "synonyms": {},                # merged over the role pack's own
     "weights": {},                 # override the 45/25/15/10/5 split
