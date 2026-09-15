@@ -21,6 +21,7 @@ from pathlib import Path
 log = logging.getLogger("screener.page")
 
 from .paths import JOBS_DIR, SEEN_PATH
+from .sources.boards import LABELS as BOARD_LABELS
 
 
 def load_seen() -> dict:
@@ -128,7 +129,7 @@ def build_rows(results: dict, seen: dict, today: str) -> list[dict]:
         naukri = merged
 
     for job in naukri:
-        # Himalayas ids already carry their own prefix, and double-prefixing
+        # Board ids already carry their own prefix, and double-prefixing
         # them would mint a new seen.json key for a job already tracked - so
         # every one of them would read as NEW on every run, forever.
         raw = str(job.get("job_id") or "")
@@ -138,7 +139,7 @@ def build_rows(results: dict, seen: dict, today: str) -> list[dict]:
         age = created_age_days(job.get("created_ms"), today)
         rows.append({
             "id": job_id,
-            "board": "Himalayas" if job.get("source") == "himalayas" else "Naukri",
+            "board": BOARD_LABELS.get(job.get("source") or "", "Naukri"),
             "title": job.get("title") or "",
             "company": job.get("company") or "",
             "location": location,
@@ -499,7 +500,10 @@ TEMPLATE = """<title>__TITLE__</title>
   function render() {
     const list = document.getElementById('list');
     const shown = ROWS.filter(visible);
-    const boards = ['Naukri', 'Himalayas', 'LinkedIn'];
+    // Naukri first, LinkedIn last, every other board in the order it appears.
+    const boards = ['Naukri'];
+    ROWS.forEach(r => { if (!boards.includes(r.board) && r.board !== 'LinkedIn') boards.push(r.board); });
+    boards.push('LinkedIn');
     let html = '';
     boards.forEach(board => {
       const group = shown.filter(r => r.board === board);

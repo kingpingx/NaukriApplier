@@ -344,6 +344,86 @@ three constraints that catch people out: the search endpoints are request-signed
 so the actor cannot be a cheap HTTP scraper, it has to run headed under Xvfb
 because Akamai blocks headless Chromium, and datacenter proxies do not work.
 
+### Remote boards and company career pages
+
+Other boards are read alongside Naukri, and each listing is scored by the same
+rules. They use each board's public feed, so there is no login and no browser.
+
+```yaml
+boards: [all]                  # or pick: himalayas, remotive, remoteok, jobicy,
+                               #          weworkremotely, workingnomads, hn
+companies:                     # a company's own ATS page, by URL slug
+  greenhouse: [gitlab, stripe]
+  lever: [palantir]
+  ashby: [ramp]
+remote_regions: []             # empty = India, APAC, Asia, Worldwide, Anywhere, Global
+```
+
+```bash
+python main.py --scan --boards all                  # Naukri + every remote board
+python main.py --scan --source none --boards all    # remote boards only, no Naukri login
+```
+
+Most "remote" jobs are open to only one country. A listing is kept only if its
+stated location names one of your `remote_regions`, or names no restriction at
+all. So "Remote (US only)" is dropped, and "India" does not match "Indiana".
+Company pages also keep jobs in your `preferred_locations`, so a Bengaluru
+opening at a Greenhouse company shows up too.
+
+If the same opening is posted on several boards, it is listed once. Naukri
+wins, then the boards in the order you list them. If one board fails, the rest
+of the run continues, and the summary names the failed board as
+`board:<name>`.
+
+What to expect from each board:
+
+| Board | Reads | Note |
+| --- | --- | --- |
+| Himalayas | ~1,200 newest | Only a few are open to India |
+| Remotive | 15 newest | The public API ignores every filter and returns 15 |
+| Remote OK | ~100 newest | |
+| Jobicy | 100 newest dev jobs | |
+| We Work Remotely | 4 programming RSS feeds | Set `weworkremotely.categories` to change them |
+| Working Nomads | ~50 newest | Covers every field, so the role gate does most of the filtering |
+| Hacker News | the latest "Who is hiring?" | Parsed from the `Company \| Role \| Where` header, so titles can be rough |
+| Greenhouse / Lever / Ashby | every open job at the companies you list | Company ATS pages |
+
+**Wellfound is not supported.** It serves a Cloudflare Turnstile challenge to
+anything that is not a real browser, and it has no public API.
+
+## Use it from anywhere (GitHub Pages)
+
+The repo publishes a website with two parts:
+
+- **Search now** (`/`): a browser app. Pick a role pack, list your skills, and
+  it searches Remotive, Remote OK, Jobicy, We Work Remotely, Hacker News, and
+  any Greenhouse, Lever or Ashby companies you name. Results are ranked with a
+  port of `screener/score.py`. Your settings stay in your browser's storage.
+- **Scheduled scan** (`/scan/`): GitHub Actions runs the Python scanner over
+  every remote board, including Himalayas and Working Nomads, every 4 hours.
+
+Naukri is not on the site. It needs your logged-in session in a real browser
+and blocks cloud IPs, so it stays `python main.py --scan` on your own machine.
+
+To turn it on:
+
+1. Make the repo public (free GitHub Pages needs one), then go to **Settings →
+   Pages → Source** and choose **GitHub Actions**.
+2. For the scheduled scan, add two repository secrets under **Settings →
+   Secrets and variables → Actions**:
+   - `RESUME_JSON`: your `data/resume.json`, with the `contact` block removed.
+   - `SCREENER_CONFIG_YAML` (optional): your `config.yaml`, with `source: none`
+     and `boards: [all]`.
+3. Run **Actions → Scan and publish → Run workflow** once. After that it runs
+   on its own.
+
+Anyone can read a public repo's Actions logs. The workflow sends the scan's
+output to a file and prints only the counts, so your searches and cities never
+appear in them. Secrets are never printed.
+
+Build the site locally with `python tools/build_site.py --out _site`, then run
+`python -m http.server -d _site` to preview it.
+
 ## Where the line is
 
 **This tool does not apply to jobs.** It finds them, ranks them, and stops.

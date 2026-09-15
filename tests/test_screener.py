@@ -1143,3 +1143,209 @@ class TestHimalayas:
                             "source": "himalayas"}]}, {}, "2026-08-31")
         assert rows[0]["id"] == "himalayas:dotnet"
         assert rows[0]["board"] == "Himalayas"
+
+    def test_remote_regions_override_the_india_default(self):
+        from screener.sources import himalayas as h
+        assert h.eligible(["Germany"], ["Germany"]) is True
+        assert h.eligible(["India"], ["Germany"]) is False
+
+
+class TestBoards:
+    """The other remote boards. Each parser is fed the shape its API really returns."""
+
+    REGIONS = ["India", "APAC", "Worldwide", "Anywhere"]
+
+    def test_open_to_keeps_unrestricted_and_matching_listings(self):
+        from screener.sources import boards as b
+        assert b.open_to("", self.REGIONS) is True
+        assert b.open_to("Anywhere in the World", self.REGIONS) is True
+        assert b.open_to("LATAM, Europe, USA, Canada, APAC", self.REGIONS) is True
+        assert b.open_to("USA Only", self.REGIONS) is False
+
+    def test_india_does_not_match_indiana(self):
+        from screener.sources import boards as b
+        assert b.open_to("Indianapolis, Indiana", self.REGIONS) is False
+        assert b.open_to("Anywhere in India", self.REGIONS) is True
+
+    def test_remotive_record(self, monkeypatch):
+        from screener.sources import boards as b
+        monkeypatch.setattr(b, "fetch_json", lambda url: {"jobs": [
+            {"id": 7, "url": "https://remotive.com/x-7", "title": ".NET Developer",
+             "company_name": "Acme ", "tags": ["c#", "azure"],
+             "publication_date": "2026-09-11T20:16:48",
+             "candidate_required_location": "Worldwide", "salary": "$50k",
+             "description": "<p>ASP.NET Core</p>"},
+            {"id": 8, "url": "https://remotive.com/x-8", "title": "T", "company_name": "C",
+             "candidate_required_location": "USA"},
+        ]})
+        jobs = b.remotive({})
+        assert [j.job_id for j in jobs] == ["remotive:7"]
+        job = jobs[0]
+        assert job.company == "Acme" and job.skills == ["c#", "azure"]
+        assert job.location == "Remote - Worldwide" and job.created_ms
+        assert job.description == "ASP.NET Core" and job.company_apply
+
+    def test_remoteok_skips_the_terms_element(self, monkeypatch):
+        from screener.sources import boards as b
+        monkeypatch.setattr(b, "fetch_json", lambda url: [
+            {"legal": "API Terms of Service"},
+            {"id": "1", "epoch": 1789344012, "position": "Backend Engineer",
+             "company": "Sleek", "tags": ["python"], "location": "",
+             "url": "https://remoteok.com/1", "salary_min": 50000, "salary_max": 80000},
+        ])
+        jobs = b.remoteok({})
+        assert len(jobs) == 1 and jobs[0].title == "Backend Engineer"
+        assert jobs[0].salary_label == "USD 50,000-80,000 annual"
+
+    def test_wwr_title_splits_company_and_role(self):
+        import xml.etree.ElementTree as ET
+        from screener.sources import boards as b
+        item = ET.fromstring(
+            "<item><title>AccuLynx: Senior Software Engineer </title>"
+            "<region>Anywhere in the World</region><skills>Vue.js, C#, and REST APIs</skills>"
+            "<pubDate>Tue, 15 Sep 2026 14:12:47 +0000</pubDate>"
+            "<link>https://weworkremotely.com/remote-jobs/acculynx-senior</link></item>")
+        job = b._wwr_item(item, self.REGIONS)
+        assert job.company == "AccuLynx" and job.title == "Senior Software Engineer"
+        assert job.skills == ["Vue.js", "C#", "REST APIs"]
+        assert job.job_id == "weworkremotely:acculynx-senior"
+
+    def test_hn_header_is_parsed_and_region_restricted_roles_dropped(self):
+        from screener.sources import boards as b
+        ok = b.hn_comment({"id": 1, "created_at_i": 1788274914, "text":
+                           "Quill | Fullstack SWE | Full-time | REMOTE (worldwide) | $150K<p>More"},
+                          self.REGIONS)
+        assert ok.company == "Quill" and ok.title == "Fullstack SWE"
+        assert ok.url.endswith("item?id=1")
+        assert b.hn_comment({"id": 2, "text": "Modash | Senior Engineer | Remote (Europe)"},
+                            self.REGIONS) is None
+        assert b.hn_comment({"id": 3, "text": "Smarkets | Engineer | Onsite (London, UK)"},
+                            self.REGIONS) is None
+        # A bare REMOTE with no region named is open to anyone.
+        assert b.hn_comment({"id": 4, "text": "Acme | Backend Engineer | REMOTE"},
+                            self.REGIONS) is not None
+
+    def test_greenhouse_keeps_preferred_cities_but_not_remote_us(self, monkeypatch):
+        from screener.sources import boards as b
+        monkeypatch.setattr(b, "fetch_json", lambda url: {"jobs": [
+            {"id": 1, "absolute_url": "u1", "title": "Engineer", "company_name": "GitLab",
+             "location": {"name": "Remote, Bangalore"}, "content": "&lt;p&gt;Go&lt;/p&gt;"},
+            {"id": 2, "absolute_url": "u2", "title": "Engineer", "company_name": "GitLab",
+             "location": {"name": "Remote - US"}},
+            {"id": 3, "absolute_url": "u3", "title": "Engineer", "company_name": "GitLab",
+             "location": {"name": "Pune"}},
+        ]})
+        config = {"companies": {"greenhouse": ["gitlab"]},
+                  "preferred_locations": ["Bangalore", "Remote"]}
+        jobs = b.greenhouse(config)
+        assert [j.job_id for j in jobs] == ["greenhouse:gitlab-1"]
+        assert jobs[0].description == "Go", "double-escaped HTML must be stripped"
+
+    def test_selection_expands_all_and_adds_company_boards(self):
+        from screener.sources import boards as b
+        chosen = b.selected({"boards": ["all"], "companies": {"lever": ["palantir"]}})
+        assert "remoteok" in chosen and "hn" in chosen and "lever" in chosen
+        assert "greenhouse" not in chosen, "no companies listed for it"
+        assert b.selected({"include_himalayas": True}) == ["himalayas"]
+
+    def test_unknown_and_unsupported_boards_are_explained(self):
+        from screener.sources import boards as b
+        problems = b.unknown(["all", "remoteok", "wellfound", "monster"])
+        assert len(problems) == 2
+        assert "Cloudflare" in problems[0] and "not a board" in problems[1]
+
+    def test_one_failing_board_does_not_sink_the_rest(self, monkeypatch):
+        from screener.sources import boards as b
+        good = Job(job_id="remoteok:1", title="Dev", company="C", url="u", source="remoteok")
+
+        def broken(config):
+            raise b.SourceError("down")
+        monkeypatch.setitem(b.READERS, "remotive", broken)
+        monkeypatch.setitem(b.READERS, "remoteok", lambda config: [good])
+        jobs, failed = b.gather({"boards": ["remotive", "remoteok"]})
+        assert jobs == [good] and failed == ["remotive"]
+
+    def test_posted_window_applies_to_boards(self, monkeypatch):
+        from screener.sources import boards as b
+        now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+        fresh = Job(job_id="remoteok:1", title="A", company="C", url="u", created_ms=now_ms)
+        stale = Job(job_id="remoteok:2", title="B", company="C", url="u",
+                    created_ms=now_ms - 40 * 86_400_000)
+        monkeypatch.setitem(b.READERS, "remoteok", lambda config: [fresh, stale])
+        jobs, _ = b.gather({"boards": ["remoteok"], "posted_within_days": 7})
+        assert jobs == [fresh]
+
+    def test_the_same_opening_on_two_boards_is_listed_once(self):
+        first = Job(job_id="remotive:1", title="Senior .NET Engineer", company="Acme",
+                    url="a", source="remotive")
+        again = Job(job_id="remoteok:9", title="Senior .NET engineer", company="ACME",
+                    url="b", source="remoteok")
+        other = Job(job_id="remoteok:10", title="QA Lead", company="Acme", url="c")
+        assert scan_mod.dedupe([first, again, other]) == [first, other]
+
+    def test_page_labels_every_board(self):
+        rows = page_mod.build_rows(
+            {"shortlist": [{"job_id": "weworkremotely:x", "title": "T", "company": "C",
+                            "location": "Remote", "score": 70.0, "url": "u",
+                            "source": "weworkremotely"}]}, {}, "2026-09-15")
+        assert rows[0]["board"] == "We Work Remotely"
+
+    def test_source_none_needs_a_board(self):
+        from screener.sources.base import get_source
+        assert get_source({"source": "none"}).gather({}) == []
+
+
+class TestNaukriFeedActor:
+    """A record exactly as blackfalcondata/naukri-jobs-feed returned it on 2026-09-15."""
+
+    RECORD = {
+        "jobId": "230426030362", "title": "Full Stack .Net Developer",
+        "companyName": "Infosys", "location": "Hyderabad",
+        "minimumExperience": 3, "maximumExperience": 8, "experienceText": "3-8 Yrs",
+        "salary": "Not disclosed",
+        "skills": [".NET", "Angular", ".NET Core", "Full Stack"],
+        "createdDate": "2026-09-15T09:17:40.881Z", "footerLabel": "Few Hours Ago",
+        "staticUrl": "https://www.naukri.com/infosys-jobs-careers-11244",
+        "portalUrl": "https://www.naukri.com/job-listings-full-stack-net-developer-infosys-hyderabad-3-to-8-years-230426030362",
+        "companyApplyJob": False,
+        "descriptionSnippet": "Strong expertise in C#, .NET, ASP.NET, .NET Core",
+    }
+
+    def test_maps_onto_the_job_shape(self):
+        from screener.sources.apify import feed_to_job
+        job = feed_to_job(self.RECORD)
+        assert job.job_id == "230426030362", "bare id, same ledger key as a local run"
+        assert job.url.endswith("-230426030362"), "the job, not the company page"
+        assert (job.min_exp, job.max_exp) == (3.0, 8.0)
+        assert job.salary_label is None and "Angular" in job.skills
+        assert job.created_ms and job.auto_applicable
+
+    def test_a_record_with_no_link_is_skipped(self):
+        from screener.sources.apify import feed_to_job
+        assert feed_to_job({"jobId": "1", "title": "T"}) is None
+
+
+class TestSiteBuild:
+    """The published site is public: only job rows may leave the machine."""
+
+    def test_latest_json_carries_no_searches_or_profile(self, tmp_path):
+        import json as json_mod
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+        import build_site
+        jobs = tmp_path / "home" / "jobs"
+        jobs.mkdir(parents=True)
+        (jobs / "openings-2026-09-15-r1.html").write_text("<p>page</p>", encoding="utf-8")
+        (jobs / "results-2026-09-15-r1.json").write_text(json_mod.dumps({
+            "at": "2026-09-15T20:00:00", "collected": 3,
+            "searches": [{"keyword": ".NET Developer", "location": "Springfield"}],
+            "shortlist": [{"job_id": "remoteok:1", "title": "Dev", "company": "C", "url": "u",
+                           "score": 80.0, "why": "skills=40", "description": "long text"}],
+            "review": [], "dropped": [{"job_id": "x"}],
+        }), encoding="utf-8")
+        build_site.build(tmp_path / "site", tmp_path / "home")
+        published = (tmp_path / "site" / "scan" / "latest.json").read_text(encoding="utf-8")
+        assert "Springfield" not in published and "searches" not in published
+        assert "long text" not in published and '"dropped"' not in published
+        assert json_mod.loads(published)["shortlist"][0]["score"] == 80.0
+        assert (tmp_path / "site" / "packs.json").exists()
+        assert (tmp_path / "site" / "index.html").exists()

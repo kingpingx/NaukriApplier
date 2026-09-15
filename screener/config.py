@@ -53,11 +53,15 @@ DEFAULTS = {
     "include_recommended": True,
 
     # --- where jobs come from --------------------------------------------
-    "source": "local",             # local | apify
+    "source": "local",             # local | apify | none (boards only)
     "headless": False,             # minimize the browser window - see session.minimize
     "include_linkedin": False,
-    "include_himalayas": False,    # add worldwide-remote listings to the run
+    "boards": [],                  # remote boards to read too - see sources/boards.py
+    "companies": {},               # greenhouse/lever/ashby: [company slugs]
+    "remote_regions": [],          # where you can work from; empty = India defaults
+    "include_himalayas": False,    # older spelling of `boards: [himalayas]`
     "himalayas": {},               # pages: how deep to page the feed
+    "weworkremotely": {},          # categories: which RSS feeds to read
     "apify": {},                   # token, actor, proxy - see docs/apify.md
 
     # --- scoring ---------------------------------------------------------
@@ -628,8 +632,19 @@ def _validate(config: dict) -> None:
             "auto_apply_min_score must be >= review_min_score "
             f"(got {config['auto_apply_min_score']} and {config['review_min_score']})."
         )
-    if config["source"] not in ("local", "apify"):
-        raise ConfigError(f"source must be 'local' or 'apify', not {config['source']!r}.")
+    if config["source"] not in ("local", "apify", "none"):
+        raise ConfigError(
+            f"source must be 'local', 'apify' or 'none', not {config['source']!r}.")
+    from .sources import boards as boards_mod
+    if isinstance(config.get("boards"), str):
+        config["boards"] = [b for b in config["boards"].split(",") if b.strip()]
+    problems = boards_mod.unknown(config.get("boards"))
+    if problems:
+        raise ConfigError("Unknown entries in `boards:`\n  " + "\n  ".join(problems))
+    if config["source"] == "none" and not boards_mod.selected(config):
+        raise ConfigError(
+            "source is 'none' but no boards are selected, so there is nothing to read.\n"
+            "  Add e.g. `boards: [all]` to config.yaml, or pass --boards all.")
     if config["source"] == "apify":
         token = (config.get("apify") or {}).get("token")
         import os
@@ -659,9 +674,16 @@ def summarise(config: dict) -> str:
         "  Experience: unknown - set `years:` in config.yaml for experience scoring",
         f"  Skills:     {len(config.get('profile_skills') or [])}",
         f"  Locations:  {', '.join(config.get('preferred_locations') or []) or '(any)'}",
-        f"  Source:     {config.get('source')}",
-        f"  Searches:   {len(searches)}",
+        f"  Source:     {config.get('source')}"
+        + ("  (Naukri skipped)" if config.get("source") == "none" else ""),
     ]
+    from .sources import boards as boards_mod
+    selected = boards_mod.selected(config)
+    if selected:
+        lines.append(f"  Boards:     {', '.join(boards_mod.LABELS.get(b, b) for b in selected)}")
+        lines.append(f"  Open from:  {', '.join(boards_mod.regions_for(config))}"
+                     "  (set `remote_regions:` to change)")
+    lines.append(f"  Searches:   {len(searches)}")
     for entry in searches:
         where = entry.get("location") or "all India"
         lines.append(f"                - {entry.get('keyword')} in {where}")

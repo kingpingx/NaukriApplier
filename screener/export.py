@@ -44,7 +44,7 @@ HEADERS = [
     ("Salary", 16),
     ("Posted", 12),
     ("Matched skills", 40),
-    ("Apply on Naukri", 16),
+    ("Apply", 16),
     ("Find on LinkedIn", 16),
     ("Applied?", 10),
     ("Where", 12),

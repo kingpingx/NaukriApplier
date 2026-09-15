@@ -259,11 +259,22 @@ def _pack_vocabulary() -> list[str]:
         return []
 
 
+def _check_boards(config: dict) -> None:
+    """The config.yaml checks, re-run for board choices made on the command line."""
+    from screener.sources import boards as boards_mod
+    problems = boards_mod.unknown(config.get("boards"))
+    if problems:
+        raise config_mod.ConfigError("Unknown boards:\n  " + "\n  ".join(problems))
+    if config.get("source") == "none" and not boards_mod.selected(config):
+        raise config_mod.ConfigError(
+            "--source none reads no Naukri, and no boards are selected. Add --boards all.")
+
+
 def cmd_check() -> int:
     config = config_mod.load()
     print("\n" + config_mod.summarise(config) + "\n")
     missing = []
-    if not paths.NAUKRI_STATE.exists():
+    if config.get("source") != "none" and not paths.NAUKRI_STATE.exists():
         missing.append("  No saved Naukri session. Run: python main.py --login")
     if config.get("profile_years") is None:
         missing.append("  Experience unknown - experience scoring will sit mid-band.\n"
@@ -277,6 +288,10 @@ def cmd_scan(args) -> int:
     config = config_mod.load()
     if args.source:
         config["source"] = args.source
+    if args.boards is not None:
+        config["boards"] = [b.strip() for b in args.boards.split(",") if b.strip()]
+    if args.source or args.boards is not None:
+        _check_boards(config)
     if args.posted_days is not None:
         config["posted_within_days"] = args.posted_days
     config["headless"] = args.headless
@@ -368,7 +383,11 @@ def main() -> int:
     parser.add_argument("--notify", action="store_true",
                         help="With --scan: desktop pop-up when it starts, finishes or fails")
 
-    parser.add_argument("--source", choices=("local", "apify"), help="Override `source:` for this run")
+    parser.add_argument("--source", choices=("local", "apify", "none"),
+                        help="Override `source:` for this run; 'none' skips Naukri")
+    parser.add_argument("--boards", metavar="LIST",
+                        help="Remote boards to read too, comma-separated, e.g. all or "
+                             "remoteok,weworkremotely,hn - overrides `boards:`")
     parser.add_argument("--limit", type=int, metavar="N", help="Keep at most N scored jobs")
     parser.add_argument("--posted-days", type=float, default=None, dest="posted_days", metavar="N",
                         help="Only listings posted in the last N days")

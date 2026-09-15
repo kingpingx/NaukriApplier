@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Scout</title>
+<meta name="description" content="Search remote job boards and company career pages, ranked against your skills.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧭</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Job Scout</h1>
+      <p class="sub">Remote boards and company career pages, ranked against your skills. Runs in your browser; your settings never leave it.</p>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab" role="tab" data-tab="search" aria-selected="true">Search now</button>
+      <button class="tab" role="tab" data-tab="scan" aria-selected="false">Scheduled scan</button>
+    </nav>
+  </header>
+
+  <section id="tab-search" class="panel">
+    <details id="settings" class="card settings">
+      <summary><span>Your profile and boards</span><span id="profile-line" class="muted"></span></summary>
+      <form id="form" autocomplete="off">
+        <div class="grid">
+          <label>Role pack
+            <select id="pack"></select>
+            <small>Supplies the field gate, spellings and vocabulary.</small>
+          </label>
+          <label>Years of experience
+            <input id="years" type="number" min="0" max="40" step="0.5" placeholder="e.g. 4">
+          </label>
+          <label class="wide">Your skills
+            <textarea id="skills" rows="3" placeholder="C#, ASP.NET Core, Angular, SQL Server"></textarea>
+            <small>Comma or one per line. Or paste your resume below and press <em>Pull skills</em>.</small>
+          </label>
+          <label class="wide">Resume text <span class="muted">(optional - improves matching)</span>
+            <textarea id="resume" rows="3" placeholder="Paste the text of your resume"></textarea>
+            <button type="button" id="pull" class="ghost small">Pull skills from resume</button>
+          </label>
+          <label>Job titles you want
+            <input id="titles" placeholder="Senior .NET Developer, Full Stack Developer">
+          </label>
+          <label>Preferred cities
+            <input id="cities" placeholder="Bengaluru, Hyderabad, Pune">
+          </label>
+          <label>Where you can work from
+            <input id="regions" placeholder="India, APAC, Asia, Worldwide, Anywhere, Global">
+            <small>Remote jobs restricted elsewhere ("US only") are dropped.</small>
+          </label>
+          <label>Posted within (days)
+            <input id="days" type="number" min="1" max="90" placeholder="any">
+          </label>
+          <label>Drop titles containing
+            <input id="exclude" placeholder="intern, fresher, sales">
+          </label>
+          <label>Drop companies
+            <input id="excludeCompanies" placeholder="">
+          </label>
+        </div>
+
+        <fieldset>
+          <legend>Boards</legend>
+          <div id="boards" class="checks"></div>
+          <small>Himalayas and Working Nomads block browsers - they are in the scheduled scan only.</small>
+        </fieldset>
+
+        <fieldset>
+          <legend>Company career pages <span class="muted">(slug from the jobs URL)</span></legend>
+          <div class="grid three">
+            <label>Greenhouse <input id="greenhouse" placeholder="gitlab, stripe"></label>
+            <label>Lever <input id="lever" placeholder="palantir"></label>
+            <label>Ashby <input id="ashby" placeholder="ramp, notion"></label>
+          </div>
+        </fieldset>
+      </form>
+    </details>
+
+    <div class="bar">
+      <button id="go" class="primary">Search</button>
+      <input id="filter" type="search" placeholder="Filter results" aria-label="Filter results">
+      <label class="toggle"><input type="checkbox" id="showLow"> Show low scores</label>
+    </div>
+
+    <div id="status" class="status" aria-live="polite"></div>
+    <div id="results"></div>
+  </section>
+
+  <section id="tab-scan" class="panel" hidden>
+    <div id="scan-head" class="card"></div>
+    <div id="scan-results"></div>
+  </section>
+
+  <footer class="foot">
+    Listings link to the original board - apply there. Scores: skills 45, title 25, experience 15, location 10, freshness 5.
+    Naukri is scanned only on your own machine: <code>python main.py --scan</code>.
+  </footer>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

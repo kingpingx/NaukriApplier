@@ -33,6 +33,7 @@ import json
 import logging
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 from urllib import error, parse, request
 
@@ -180,4 +181,59 @@ def _load_session(settings: dict) -> dict | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         log.warning("Could not read session at %s (%s); running signed out", path, exc)
+        return None
+
+
+# The public Store actor that reads Naukri's search without a login. Its output
+# is its own shape, not Naukri's raw payload, so it gets its own mapping.
+FEED_ACTOR = "blackfalcondata/naukri-jobs-feed"
+
+
+def feed_to_job(record: dict) -> Job | None:
+    """One record from FEED_ACTOR, as a Job.
+
+    `portalUrl` is the job; `staticUrl` is the company's careers page, and
+    linking that would send every "Apply" click to the wrong place.
+    Ids stay bare Naukri ids, so a job seen by a local run and by this actor is
+    the same ledger entry rather than two.
+    """
+    job_id, url = str(record.get("jobId") or ""), record.get("portalUrl") or ""
+    if not job_id or not url:
+        return None
+    created_ms = None
+    stamp = record.get("createdDate")
+    if stamp:
+        try:
+            created_ms = int(datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+                             .timestamp() * 1000)
+        except ValueError:
+            pass
+    salary = (record.get("salary") or "").strip()
+    rating = (record.get("ambitionBox") or {}).get("rating")
+    return Job(
+        job_id=job_id,
+        title=(record.get("title") or "").strip(),
+        company=(record.get("companyName") or "").strip(),
+        url=url,
+        skills=[str(s).strip() for s in record.get("skills") or [] if str(s).strip()],
+        location=record.get("location") or None,
+        experience_label=record.get("experienceText") or None,
+        salary_label=None if not salary or salary.lower() == "not disclosed" else salary,
+        min_exp=_as_float(record.get("minimumExperience")),
+        max_exp=_as_float(record.get("maximumExperience")),
+        description=(record.get("description") or record.get("descriptionSnippet") or "").strip(),
+        posted_label=record.get("footerLabel") or None,
+        created_ms=created_ms,
+        company_apply=bool(record.get("companyApplyJob")),
+        # The feed does not say whether applying opens a questionnaire.
+        has_questionnaire=False,
+        company_rating=_as_float(rating),
+        source="apify",
+    )
+
+
+def _as_float(value) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
         return None

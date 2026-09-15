@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import date, datetime
 from pathlib import Path
 
@@ -38,17 +39,16 @@ def run(config: dict, *, refresh: bool = False, limit: int | None = None) -> dic
     failed = list(getattr(source, "failed", []))
 
     # Supplementary boards are additive, not alternatives: `source:` decides how
-    # the main board is reached, and this bolts another one alongside it. A
-    # failure here must not lose the Naukri results already in hand, so it is
-    # logged and the run continues.
-    if config.get("include_himalayas"):
-        try:
-            from .sources.himalayas import HimalayasSource
-            extra = HimalayasSource().gather(config)
-            log.info("Adding %d listing(s) from himalayas", len(extra))
-            jobs = list(jobs) + extra
-        except Exception as exc:
-            log.warning("himalayas skipped: %s", exc)
+    # the main board is reached, and `boards:` bolts others alongside it. A
+    # failing board must not lose the results already in hand, so it is named
+    # in `failed` and the run continues.
+    from .sources import boards as boards_mod
+    extra, failed_boards = boards_mod.gather(config)
+    if extra:
+        log.info("Adding %d listing(s) from %s", len(extra),
+                 ", ".join(sorted({j.source for j in extra})))
+    jobs = dedupe(list(jobs) + extra)
+    failed += [f"board:{name}" for name in failed_boards]
 
     if not jobs:
         return {
@@ -107,6 +107,29 @@ def run(config: dict, *, refresh: bool = False, limit: int | None = None) -> dic
         "failed_searches": failed,
         "_jobs": shortlist + review,   # live objects, stripped before serialising
     }
+
+
+def _same_job_key(job) -> tuple[str, str]:
+    def norm(text):
+        return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+    return norm(job.company), norm(job.title)
+
+
+def dedupe(jobs: list) -> list:
+    """Drop the same opening seen on a second board, keeping the first.
+
+    Remote companies post one role to three boards at once; without this the
+    shortlist fills with one job three times. Order is preserved, so the main
+    source wins, then boards in the order `boards:` lists them.
+    """
+    kept, keys = [], set()
+    for job in jobs:
+        key = _same_job_key(job)
+        if all(key) and key in keys:
+            continue
+        keys.add(key)
+        kept.append(job)
+    return kept
 
 
 def write(summary: dict, config: dict, *, excel: bool = True, html: bool = True) -> dict[str, Path]:

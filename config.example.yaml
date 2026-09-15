@@ -120,7 +120,41 @@ synonyms: {}
 #        account, a token, and your Naukri session uploaded there.
 #        Read docs/apify.md first - it is not a cheap HTTP scraper, and the
 #        session upload is a real trade-off.
+# none   Skip Naukri and read only the boards below. No login needed.
 source: local
+
+# Remote job boards to read alongside Naukri, over their public feeds - no
+# login, no browser. Every listing is scored by the same rules as Naukri's.
+#
+#   all             every board below that needs no setup
+#   himalayas       worldwide-remote startups
+#   remotive        remote tech jobs (its API only ever returns the newest 15)
+#   remoteok        remote tech jobs, ~100 newest
+#   jobicy          remote dev jobs, 100 newest
+#   weworkremotely  programming + devops RSS feeds
+#   workingnomads   curated remote jobs
+#   hn              the latest Hacker News "Who is hiring?" thread
+#
+# Wellfound is not on the list: it blocks non-browser clients outright.
+boards: []
+  # - all
+
+# Where you can legally work from. A remote listing is kept only if it names
+# one of these, or names no restriction at all - so "Remote (US only)" is
+# dropped. Empty means: India, APAC, Asia, Worldwide, Anywhere, Global.
+remote_regions: []
+
+# Companies whose own career pages to read, by the slug in their jobs URL:
+#   boards.greenhouse.io/<slug>   jobs.lever.co/<slug>   jobs.ashbyhq.com/<slug>
+# Listing any company here switches that board on. Jobs are kept if they are
+# remote-open to you or in one of your preferred_locations.
+companies: {}
+  # greenhouse: [gitlab, stripe, databricks]
+  # lever: [palantir]
+  # ashby: [ramp, notion]
+
+weworkremotely: {}
+  # categories: [remote-back-end-programming-jobs, remote-full-stack-programming-jobs]
 
 # Minimize the browser window for every command but --login, same as passing
 # --headless. Naukri blocks true headless browsers, so this is a normal browser

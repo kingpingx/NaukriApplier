@@ -1,0 +1,122 @@
+# Scan the remote boards every 4 hours and publish the site to GitHub Pages.
+#
+#   /          the browser app - search live, from any device
+#   /scan/     the latest scheduled scan, scored by the Python scorer
+#
+# Naukri is not scanned here: it needs a logged-in browser and blocks cloud
+# IPs. Run `python main.py --scan` on your own machine for that.
+#
+# Two repository secrets feed the scan (Settings -> Secrets and variables ->
+# Actions). Without RESUME_JSON the site is still published, with no scan.
+#
+#   RESUME_JSON           data/resume.json, contact details removed
+#   SCREENER_CONFIG_YAML  your config.yaml (optional; config.example.yaml otherwise)
+#
+# This repo is public, so its Actions logs are too. The scan's output goes to
+# a file and only the counts are printed - your searches and cities are not.
+
+name: Scan and publish
+
+on:
+  schedule:
+    - cron: "17 */4 * * *"       # every 4 hours, off the hour to dodge the rush
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "tools/build_site.py"
+      - "profiles/**"
+      - "screener/**"
+      - ".github/workflows/pages.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      SCREENER_HOME: ${{ github.workspace }}/.screener
+      SCREENER_CONFIG: ${{ github.workspace }}/.screener/config.yaml
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Only what a boards-only scan imports. Playwright is for Naukri.
+      - run: pip install "PyYAML>=6.0" "openpyxl>=3.1"
+
+      # seen.json and the ledger carry between runs, so the page can mark what
+      # is new since the last scan. Only those two files are cached: a cache on
+      # a public repo is readable by pull-request workflows, and the resume
+      # must never end up in one.
+      - uses: actions/cache/restore@v4
+        with:
+          path: .screener/state
+          key: scan-state-${{ github.run_id }}
+          restore-keys: scan-state-
+
+      - name: Write private settings
+        env:
+          RESUME_JSON: ${{ secrets.RESUME_JSON }}
+          SCREENER_CONFIG_YAML: ${{ secrets.SCREENER_CONFIG_YAML }}
+        run: |
+          mkdir -p .screener/jobs .screener/state
+          cp .screener/state/*.json .screener/jobs/ 2>/dev/null || true
+          if [ -z "$RESUME_JSON" ]; then
+            echo "::warning::RESUME_JSON secret is not set - publishing the app without a scan."
+            echo "SKIP_SCAN=1" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          printf '%s' "$RESUME_JSON" > .screener/resume.json
+          if [ -n "$SCREENER_CONFIG_YAML" ]; then
+            printf '%s' "$SCREENER_CONFIG_YAML" > .screener/config.yaml
+          else
+            cp config.example.yaml .screener/config.yaml
+          fi
+
+      - name: Scan the remote boards
+        if: env.SKIP_SCAN != '1'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python main.py --scan --source none --boards all --refresh > .screener/scan.log 2>&1 \
+            || { echo "::error::Scan failed - last lines:"; tail -n 5 .screener/scan.log | grep -v -i "location\|search" ; exit 1; }
+          grep -E "Collected|already seen|Shortlist:|Worth a read:|search\(es\) failed" .screener/scan.log || true
+
+      - name: Keep state for the next run
+        if: env.SKIP_SCAN != '1'
+        run: cp .screener/jobs/seen.json .screener/jobs/ledger.json .screener/state/ 2>/dev/null || true
+
+      - uses: actions/cache/save@v4
+        if: env.SKIP_SCAN != '1'
+        with:
+          path: .screener/state
+          key: scan-state-${{ github.run_id }}
+
+      - name: Build the site
+        run: python tools/build_site.py --out _site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

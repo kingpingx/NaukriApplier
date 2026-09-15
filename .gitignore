@@ -19,6 +19,7 @@ config.yaml
 config.local.yaml
 
 # Run output
+_site/
 logs/
 *.xlsx
 *.log

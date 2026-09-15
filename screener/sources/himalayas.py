@@ -63,12 +63,13 @@ def _strip_html(text: str | None) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def eligible(restrictions: list | None) -> bool:
-    """Whether someone working from India could hold this role."""
+def eligible(restrictions: list | None, regions: list[str] | None = None) -> bool:
+    """Whether someone working from India - or from `regions` - could hold this role."""
     if not restrictions:
         return True                      # unrestricted means worldwide
     joined = " ".join(str(r) for r in restrictions).lower()
-    return any(term in joined for term in OPEN_TO_INDIA)
+    terms = [str(r).lower() for r in regions] if regions else OPEN_TO_INDIA
+    return any(term in joined for term in terms)
 
 
 def _salary_label(record: dict) -> str | None:
@@ -177,7 +178,9 @@ class HimalayasSource:
         pages = int(settings.get("pages") or DEFAULT_PAGES)
 
         records = fetch(pages)
-        open_to_you = [r for r in records if eligible(r.get("locationRestrictions"))]
+        regions = config.get("remote_regions") or None
+        open_to_you = [r for r in records
+                       if eligible(r.get("locationRestrictions"), regions)]
 
         jobs, seen = [], set()
         for record in open_to_you:

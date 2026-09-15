@@ -28,7 +28,19 @@ def get_source(config: dict):
         from .apify import ApifySource
         return ApifySource()
 
+    if name == "none":
+        return NoSource()
+
     raise SourceError(
-        f"Unknown source {name!r}. Use 'local' (Playwright on this machine) "
-        "or 'apify' (Apify actor in the cloud)."
+        f"Unknown source {name!r}. Use 'local' (Playwright on this machine), "
+        "'apify' (Apify actor in the cloud), or 'none' (skip Naukri, boards only)."
     )
+
+
+class NoSource:
+    """Skip Naukri entirely - the run reads only the boards in `boards:`."""
+
+    name = "boards only"
+
+    def gather(self, config: dict) -> list:
+        return []
