@@ -45,6 +45,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
+from .. import careers
 from ..model import Job
 from .base import SourceError
 
@@ -301,6 +302,8 @@ def _wwr_item(item, regions: list[str]) -> Job | None:
         pass
     label, ms = posted(when)
     skills = [s.strip() for s in re.split(r",|\band\b", item.findtext("skills") or "") if s.strip()]
+    # Read before the HTML is stripped - the links go with it.
+    career, career_kind = careers.employer_link(item.findtext("description"))
     return _job(
         "weworkremotely", link.rstrip("/").rsplit("/", 1)[-1],
         title=title.strip(), company=company.strip(), url=link,
@@ -308,6 +311,7 @@ def _wwr_item(item, regions: list[str]) -> Job | None:
         location="Remote - " + region if region else "Remote",
         description=strip_html(item.findtext("description")),
         posted_label=label, created_ms=ms,
+        career_url=career, career_kind=career_kind,
     )
 
 

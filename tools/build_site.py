@@ -32,7 +32,7 @@ PACK_KEYS = ("description", "searches", "must_have_any", "exclude_title_keywords
 # Fields a job row needs on the site. Everything else stays behind.
 JOB_KEYS = ("job_id", "title", "company", "url", "location", "salary_label",
             "experience_label", "posted_label", "created_ms", "source", "score",
-            "why", "skills", "company_apply")
+            "why", "skills", "company_apply", "career_url", "career_kind")
 
 PLACEHOLDER = """<!doctype html><meta charset="utf-8"><title>No scan yet</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">

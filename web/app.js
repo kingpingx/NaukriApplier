@@ -156,6 +156,7 @@ const READERS = {
           url: link, location: remote(region),
           skills: get('skills').split(/,|\band\b/).map((x) => x.trim()).filter(Boolean),
           description: stripHtml(get('description')), createdMs: ms(get('pubDate')),
+          ...employerLink(get('description')),
         }));
       }
     }
@@ -524,6 +525,125 @@ async function search() {
 
 function status(html) { $('#status').innerHTML = html; }
 
+// --- the employer's own page: a port of screener/careers.py -------------
+// We Work Remotely's "Apply" goes through We Work Remotely, so its listings
+// also get the employer's page: a link in the posting, else the exact posting
+// on the company's own ATS, else its job board, else a web search.
+
+const CAREER_BOARDS = new Set(['weworkremotely']);
+const SKIP_LINK = /weworkremotely|imgix|linkedin\.com|twitter\.com|\/\/x\.com|facebook|instagram|youtube|glassdoor|\/\/t\.co\//i;
+const ATS_HOST = /greenhouse\.io|lever\.co|ashbyhq\.com|workable\.com|smartrecruiters\.com|recruitee\.com|bamboohr\.com|myworkdayjobs\.com|teamtailor\.com|breezy\.hr|jobvite\.com|personio\.|click2apply/i;
+const APPLY_LINK = /apply|gh_jid|\/jobs?\/[^/?#]+|\/job\/|\/positions?\/[^/?#]+|\/openings?\/[^/?#]+/i;
+const CAREERS_LINK = /career|\/jobs?\b/i;
+const NOT_A_JOB = /benefit|culture|about|blog|privacy|values|life-at|\/team\b|press|news/i;
+const KIND_CAREERS = 'careers page named in the posting';
+const SUFFIXES = /\b(inc|llc|ltd|gmbh|ab|bv|co|corp|corporation|limited|labs?|technologies|technology|software|group|hq)\b\.?/gi;
+const TITLE_STOP = new Set(['remote', 'the', 'a', 'an', 'and', 'of', 'for', 'to', 'in', 'at', 'with', 'm', 'f', 'd', 'w']);
+const ATS_LABEL = { greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby', smartrecruiters: 'SmartRecruiters', recruitee: 'Recruitee', workable: 'Workable' };
+const ATS_BOARD = {
+  greenhouse: (s) => `https://job-boards.greenhouse.io/${s}`, lever: (s) => `https://jobs.lever.co/${s}`,
+  ashby: (s) => `https://jobs.ashbyhq.com/${s}`, smartrecruiters: (s) => `https://careers.smartrecruiters.com/${s}`,
+  recruitee: (s) => `https://${s}.recruitee.com/`, workable: (s) => `https://apply.workable.com/${s}/`,
+};
+
+function employerLink(html) {
+  const links = [...String(html || '').matchAll(/href="(https?:\/\/[^"]+)"/g)]
+    .map((m) => decode(m[1])).filter((l) => !SKIP_LINK.test(l) && !NOT_A_JOB.test(l));
+  const post = links.find((l) => ATS_HOST.test(l) || APPLY_LINK.test(l));
+  if (post) return { careerUrl: post, careerKind: 'apply link in the posting' };
+  const careers = links.find((l) => CAREERS_LINK.test(l));
+  return careers ? { careerUrl: careers, careerKind: KIND_CAREERS } : {};
+}
+
+const cleanTitle = (t) => String(t || '').replace(/\[[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim();
+
+function companySlugs(company) {
+  const lower = String(company || '').toLowerCase();
+  const full = lower.match(/[a-z0-9]+/g) || [];
+  const core = lower.replace(SUFFIXES, ' ').match(/[a-z0-9]+/g) || full;
+  return [...new Set([full.join(''), core.join(''), core.join('-'), core[0] || ''])].filter(Boolean);
+}
+
+function titleTokens(title) {
+  const t = cleanTitle(title).toLowerCase().replace(/\.net/g, ' dotnet ').replace(/c#/g, ' csharp ');
+  return new Set((t.match(/[a-z0-9]+/g) || []).filter((w) => !TITLE_STOP.has(w)));
+}
+
+function similarity(a, b) {
+  const A = titleTokens(a), B = titleTokens(b);
+  const union = new Set([...A, ...B]).size;
+  return union ? [...A].filter((x) => B.has(x)).length / union : 0;
+}
+
+function searchUrl(company, title) {
+  return 'https://www.google.com/search?q=' + encodeURIComponent(`"${company}" ${cleanTitle(title)} careers`);
+}
+
+async function tryJSON(url) { try { return await getJSON(url); } catch { return null; } }
+
+const ATS_READERS = {
+  async greenhouse(s) { const d = await tryJSON(`https://boards-api.greenhouse.io/v1/boards/${s}/jobs`); return d?.jobs?.map((j) => [j.title, j.absolute_url]); },
+  async lever(s) { const d = await tryJSON(`https://api.lever.co/v0/postings/${s}?mode=json`); return Array.isArray(d) ? d.map((j) => [j.text, j.hostedUrl]) : null; },
+  async ashby(s) { const d = await tryJSON(`https://api.ashbyhq.com/posting-api/job-board/${s}`); return d?.jobs?.map((j) => [j.title, j.jobUrl]); },
+  async smartrecruiters(s) { const d = await tryJSON(`https://api.smartrecruiters.com/v1/companies/${s}/postings?limit=100`); return d?.content?.map((j) => [j.name, `https://jobs.smartrecruiters.com/${s}/${j.id}`]); },
+  async recruitee(s) { const d = await tryJSON(`https://${s}.recruitee.com/api/offers/`); return d?.offers?.map((j) => [j.title, j.careers_url]); },
+  async workable(s) { const d = await tryJSON(`https://apply.workable.com/api/v1/widget/accounts/${s}`); return d?.jobs?.map((j) => [j.title, j.url || j.shortlink]); },
+};
+
+const boardCache = new Map();
+async function findBoard(company) {
+  if (!boardCache.has(company)) {
+    boardCache.set(company, (async () => {
+      for (const slug of companySlugs(company)) {
+        for (const [ats, read] of Object.entries(ATS_READERS)) {
+          const found = await read(slug);
+          if (found && found.length) return { ats, slug, found };
+        }
+      }
+      return null;
+    })());
+  }
+  return boardCache.get(company);
+}
+
+async function findCareer(company, title) {
+  const board = await findBoard(company);
+  if (board) {
+    const best = board.found.reduce((a, b) => (similarity(title, b[0]) > similarity(title, a[0]) ? b : a));
+    if (best[1] && similarity(title, best[0]) >= 0.6) return { careerUrl: best[1], careerKind: `exact posting on ${ATS_LABEL[board.ats]}` };
+    if (companySlugs(company).slice(0, 2).includes(board.slug)) return { careerUrl: ATS_BOARD[board.ats](board.slug), careerKind: `company jobs on ${ATS_LABEL[board.ats]}` };
+  }
+  return { careerUrl: searchUrl(company, title), careerKind: 'web search' };
+}
+
+function careerHtml(j) {
+  if (j.careerUrl) {
+    // A general careers page from the posting can still be narrowed to the opening.
+    const narrow = j.careerKind === KIND_CAREERS && !j.careerTried && CAREER_BOARDS.has(j.source)
+      ? ` · <button type="button" class="linkish" data-find="${esc(j.id)}">find the exact posting</button>` : '';
+    return `<p class="career">Apply at the employer: <a href="${esc(safeUrl(j.careerUrl))}" target="_blank" rel="noopener">${esc(j.careerKind || 'career page')}</a>${narrow}</p>`;
+  }
+  if (!CAREER_BOARDS.has(j.source)) return '';
+  return `<p class="career"><button type="button" class="linkish" data-find="${esc(j.id)}">Find the employer's page</button>
+    · <a href="${esc(searchUrl(j.company, j.title))}" target="_blank" rel="noopener">search</a></p>`;
+}
+
+const JOBS = new Map();
+
+async function onFindCareer(e) {
+  const button = e.target.closest('button[data-find]');
+  if (!button) return;
+  const j = JOBS.get(button.dataset.find);
+  if (!j) return;
+  button.disabled = true;
+  button.textContent = 'Looking…';
+  const found = await findCareer(j.company, j.title);
+  // Keep a careers page the employer named unless the exact posting turned up.
+  if (!j.careerUrl || found.careerKind.startsWith('exact posting')) Object.assign(j, found);
+  j.careerTried = true;
+  button.closest('.career').outerHTML = careerHtml(j);
+}
+
 // --- results ------------------------------------------------------------
 
 function band(scoreValue) {
@@ -537,12 +657,14 @@ function card(j, applied) {
                 j.posted || postedLabel(j.createdMs)].filter(Boolean);
   const why = j.why || Object.entries(j.breakdown || {}).map(([k, v]) => `${k} ${v}`).join(' · ');
   const matched = (j.matched || []).slice(0, 8);
+  JOBS.set(j.id, j);
   return `<article class="job ${applied ? 'applied' : ''}">
     <div class="score ${band(j.score)}">${esc(j.score)}</div>
     <div class="body">
       <h3><a href="${esc(safeUrl(j.url))}" target="_blank" rel="noopener">${esc(j.title)}</a></h3>
       <p class="co">${esc(j.company)}</p>
       <p class="meta">${meta.map(esc).join(' · ')}</p>
+      ${careerHtml(j)}
       ${matched.length ? `<p class="tags">${matched.map((m) => `<span>${esc(m)}</span>`).join('')}</p>` : ''}
       <p class="why">${esc(why)}</p>
     </div>
@@ -580,6 +702,7 @@ async function loadScan() {
       id: r.job_id, title: r.title, company: r.company, url: r.url, location: r.location,
       salary: r.salary_label, experience: r.experience_label, posted: r.posted_label,
       source: r.source || '', score: r.score, why: r.why, matched: [],
+      careerUrl: r.career_url || '', careerKind: r.career_kind || '',
     }));
     const when = data.at ? new Date(data.at).toLocaleString() : 'unknown';
     head.innerHTML = `<p><strong>${rows.length}</strong> ranked from ${esc(data.collected)} listings · scanned ${esc(when)}.
@@ -706,6 +829,8 @@ async function boot() {
   $('#showLow').addEventListener('change', render);
   $('#results').addEventListener('change', onApplied);
   $('#scan-results').addEventListener('change', onApplied);
+  $('#results').addEventListener('click', onFindCareer);
+  $('#scan-results').addEventListener('click', onFindCareer);
   $('#pull').addEventListener('click', () => {
     const s = readForm();
     const pack = PACKS[s.pack] || {};

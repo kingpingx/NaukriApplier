@@ -50,6 +50,8 @@ HEADERS = [
     ("Where", 12),
     ("Applied on", 12),
     ("Notes", 30),
+    # Last on purpose: the dropdowns above are pinned to columns L and M.
+    ("Employer page", 18),
 ]
 
 # Naukri writes the current official names, which are not what people search
@@ -185,6 +187,11 @@ def to_excel(jobs: list, path: Path, ledger: Ledger | None = None,
         linkedin_cell = sheet.cell(row=row, column=11, value="Search")
         linkedin_cell.hyperlink = linkedin_search_url(job)
         linkedin_cell.font = link_font
+
+        if getattr(job, "career_url", None):
+            career_cell = sheet.cell(row=row, column=16, value=job.career_kind or "Employer page")
+            career_cell.hyperlink = job.career_url
+            career_cell.font = link_font
 
         if already:
             for column in range(1, len(HEADERS) + 1):

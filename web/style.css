@@ -109,6 +109,9 @@ button { font: inherit; cursor: pointer; border-radius: 8px; }
 .why { font-size: 12px; }
 .tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 0; }
 .tags span { font-size: 12px; background: var(--lo-bg); padding: 1px 8px; border-radius: 999px; }
+.career { margin: 4px 0 0; font-size: 13px; }
+.linkish { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; font-size: 13px; }
+.linkish:disabled { color: var(--muted); text-decoration: none; cursor: progress; }
 .done { font-weight: 400; font-size: 13px; white-space: nowrap; display: flex; align-items: center; }
 .empty { color: var(--muted); }
 

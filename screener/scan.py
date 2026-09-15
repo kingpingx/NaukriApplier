@@ -87,6 +87,17 @@ def run(config: dict, *, refresh: bool = False, limit: int | None = None) -> dic
     shortlist = shortlist[:target]
     review = review[:max(0, target - len(shortlist))]
 
+    # Listings from boards whose "Apply" goes through the board also get the
+    # employer's own page. Only for jobs that made a band: finding a company's
+    # board costs a few requests per company.
+    from . import careers
+    todo = [j for j in shortlist + review if j.source in careers.BOARDS]
+    if todo:
+        try:
+            careers.resolve(todo)
+        except Exception as exc:          # a lookup failure must not lose the scan
+            log.warning("Employer page lookup skipped: %s", exc)
+
     for job in shortlist + review:
         ledger.record(job, "shortlisted" if job.score >= strong_at else "review",
                       score_mod.explain(job))

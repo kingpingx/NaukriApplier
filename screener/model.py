@@ -61,6 +61,10 @@ class Job:
     has_questionnaire: bool = False
     company_rating: float | None = None
     source: str = ""
+    # Where the employer itself lists the job, for boards whose own "Apply"
+    # goes through the board - see careers.py.
+    career_url: str | None = None
+    career_kind: str | None = None
 
     @classmethod
     def from_api(cls, record: dict, source: str = "") -> "Job":

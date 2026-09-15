@@ -153,6 +153,8 @@ def build_rows(results: dict, seen: dict, today: str) -> list[dict]:
             "remote": "remote" in location.lower(),
             "easy": not job.get("company_apply") and not job.get("has_questionnaire"),
             "note": ", ".join((job.get("matched_skills") or [])[:6]),
+            "career": job.get("career_url") or "",
+            "career_kind": job.get("career_kind") or "",
             "new": first == today,
             "first_seen": first,
         })
@@ -487,6 +489,8 @@ TEMPLATE = """<title>__TITLE__</title>
           '<div class="company">' + esc(r.company) + '</div>' +
           '<div class="tags">' + tags + '</div>' +
           (r.note ? '<div class="note">' + esc(r.note) + '</div>' : '') +
+          (r.career ? '<div class="note">Apply at the employer: <a href="' + esc(r.career) +
+            '" target="_blank" rel="noopener">' + esc(r.career_kind || 'career page') + '</a></div>' : '') +
         '</div>' +
         '<div class="meta"><div>' + (r.location ? esc(r.location) : '&mdash;') + '</div>' +
           (r.salary ? '<div>' + esc(r.salary) + '</div>' : '') + '</div>' +

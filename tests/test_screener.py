@@ -1349,3 +1349,112 @@ class TestSiteBuild:
         assert json_mod.loads(published)["shortlist"][0]["score"] == 80.0
         assert (tmp_path / "site" / "packs.json").exists()
         assert (tmp_path / "site" / "index.html").exists()
+
+
+class TestCareers:
+    """The employer's own page for a We Work Remotely listing."""
+
+    def test_employer_link_prefers_an_ats_over_a_careers_page(self):
+        from screener import careers
+        html = ('<a href="https://twitter.com/acme">x</a> <a href="https://acme.com/careers">c</a> '
+                '<a href="https://boards.greenhouse.io/acme/jobs/1">apply</a>')
+        assert careers.employer_link(html) == ("https://boards.greenhouse.io/acme/jobs/1", careers.KIND_POSTING)
+
+    def test_board_self_links_and_social_are_not_employer_pages(self):
+        from screener import careers
+        html = ('To apply: <a href="https://weworkremotely.com/remote-jobs/acme-dev">here</a> '
+                '<a href="https://www.linkedin.com/company/acme/jobs">jobs</a>')
+        assert careers.employer_link(html) == (None, None)
+
+    def test_a_benefits_page_is_not_an_apply_link(self):
+        """Samsara's posting links careers/benefits - it read as the apply link."""
+        from screener import careers
+        html = '<a href="https://www.samsara.com/company/careers/benefits">perks</a>'
+        assert careers.employer_link(html) == (None, None)
+
+    def test_a_bare_careers_page_is_second_best(self):
+        from screener import careers
+        assert careers.employer_link('<a href="https://toggl.com/jobs/">jobs</a>') == \
+            ("https://toggl.com/jobs/", careers.KIND_CAREERS)
+        assert careers.employer_link('<a href="https://toggl.com/jobs/senior-full-stack">x</a>')[1] == \
+            careers.KIND_POSTING
+
+    def test_a_careers_page_is_replaced_only_by_the_exact_posting(self, monkeypatch):
+        from screener import careers
+        monkeypatch.setattr(careers, "READERS", {"greenhouse": lambda slug: [
+            ("Senior Full Stack", "https://gh/toggl/9")] if slug == "toggl" else None})
+        exact = Job(job_id="weworkremotely:a", title="Senior Full Stack", company="Toggl", url="u",
+                    career_url="https://toggl.com/jobs/", career_kind=careers.KIND_CAREERS)
+        guess = Job(job_id="weworkremotely:b", title="Designer", company="Toggl", url="u",
+                    career_url="https://toggl.com/jobs/", career_kind=careers.KIND_CAREERS)
+        careers.resolve([exact, guess])
+        assert exact.career_url == "https://gh/toggl/9"
+        assert guess.career_url == "https://toggl.com/jobs/", "a board guess must not replace it"
+
+    def test_reference_codes_are_ignored_in_titles(self):
+        from screener import careers
+        assert careers.similarity("[Job -26953] Senior Full Stack Developer",
+                                  "Senior Full Stack Developer") == 1.0
+        assert "26953" not in careers.search_url("Ci&t", "[Job -26953] Senior Full Stack Developer")
+
+    def test_slugs_try_the_whole_name_before_trimming_it(self):
+        from screener import careers
+        assert careers.slugs("Proxify AB")[:2] == ["proxifyab", "proxify"]
+        assert careers.slugs("Grafana Labs")[:2] == ["grafanalabs", "grafana"]
+
+    def test_an_exact_title_on_the_board_wins(self):
+        from screener import careers
+        board = ("greenhouse", "pinterest", [("Designer", "u-design"),
+                                             ("Data Scientist II, ML Infrastructure", "u-ds")])
+        url, kind = careers.choose("Pinterest", "Data Scientist II, ML Infrastructure", board)
+        assert url == "u-ds" and kind == "exact posting on Greenhouse"
+
+    def test_dotnet_spellings_match(self):
+        from screener import careers
+        assert careers.similarity("Senior .NET Engineer", "Senior dotnet engineer") == 1.0
+
+    def test_board_fallback_only_on_a_strong_name_guess(self):
+        """A first-word guess can be another company - so it gets a search, not their board."""
+        from screener import careers
+        strong = ("lever", "legion", [("Chief Architect", "u")])
+        url, kind = careers.choose("Legion Technologies", "Staff Designer", strong)
+        assert url == "https://jobs.lever.co/legion" and kind == "company jobs on Lever"
+        weak = ("greenhouse", "open", [("Chief Architect", "u")])
+        url, kind = careers.choose("Open Education Applications", "Staff Designer", weak)
+        assert kind == "web search" and "google.com/search" in url
+
+    def test_resolve_fills_only_jobs_without_a_link(self, monkeypatch):
+        from screener import careers
+        calls = []
+
+        def greenhouse(slug):
+            calls.append(slug)
+            return [("Backend Engineer", "https://gh/acme/1")] if slug == "acme" else None
+        monkeypatch.setattr(careers, "READERS", {"greenhouse": greenhouse})
+        found = Job(job_id="weworkremotely:a", title="Backend Engineer", company="Acme", url="u")
+        kept = Job(job_id="weworkremotely:b", title="X", company="Other", url="u",
+                   career_url="https://other.com/apply", career_kind=careers.KIND_POSTING)
+        careers.resolve([found, kept])
+        assert found.career_url == "https://gh/acme/1"
+        assert kept.career_url == "https://other.com/apply"
+        assert "other" not in calls, "a job that already has a link is not looked up"
+
+    def test_wwr_item_keeps_the_employer_link_from_its_description(self):
+        import xml.etree.ElementTree as ET
+        from screener.sources import boards as b
+        item = ET.fromstring(
+            "<item><title>Acme: Backend Engineer</title><region>Anywhere in the World</region>"
+            "<link>https://weworkremotely.com/remote-jobs/acme-backend</link>"
+            "<description>&lt;a href=\"https://jobs.lever.co/acme/123\"&gt;Apply&lt;/a&gt;</description></item>")
+        job = b._wwr_item(item, ["Anywhere"])
+        assert job.career_url == "https://jobs.lever.co/acme/123"
+        assert job.career_kind == "apply link in the posting"
+
+    def test_the_page_row_carries_the_employer_link(self):
+        rows = page_mod.build_rows(
+            {"shortlist": [{"job_id": "weworkremotely:x", "title": "T", "company": "C", "url": "u",
+                            "source": "weworkremotely", "score": 70.0, "location": "Remote",
+                            "career_url": "https://jobs.lever.co/c/1",
+                            "career_kind": "exact posting on Lever"}]}, {}, "2026-09-15")
+        assert rows[0]["career"] == "https://jobs.lever.co/c/1"
+        assert rows[0]["career_kind"] == "exact posting on Lever"
