@@ -5,9 +5,9 @@ It drives real search pages in a real browser, reading the JSON each page
 fetches for itself - see screener/search.py for why the endpoints cannot be
 called directly.
 
-Headed by default, and that is not a stylistic choice: Naukri sits behind
+Always a headed browser, and that is not a stylistic choice: Naukri sits behind
 Akamai, which serves "Access Denied" to headless Chromium. `headless: true`
-is honoured if you ask for it, and will probably fail.
+minimizes that headed window instead - see `session.minimize`.
 """
 from __future__ import annotations
 
@@ -26,18 +26,17 @@ log = logging.getLogger("screener.sources.local")
 class LocalSource:
     name = "local"
 
+    def __init__(self):
+        self.failed: list[str] = []   # searches whose navigation failed this run
+
     def gather(self, config: dict) -> list:
         headless = bool(config.get("headless", False))
-        if headless:
-            log.warning(
-                "Running headless. Naukri's bot protection usually blocks this - "
-                "if every search returns nothing, that is why.")
 
         try:
             with sync_playwright() as p:
                 browser, _context, page = open_profile(p, NAUKRI_STATE, headless=headless)
                 try:
-                    jobs = search_mod.gather(page, config)
+                    jobs = search_mod.gather(page, config, failed=self.failed)
                 finally:
                     browser.close()
         except NotLoggedIn:
@@ -48,5 +47,5 @@ class LocalSource:
         if not jobs:
             log.warning(
                 "No jobs collected. Common causes: an expired session (re-run "
-                "--login), searches too narrow, or a headless run being blocked.")
+                "--login) or searches too narrow.")
         return jobs

@@ -122,6 +122,11 @@ synonyms: {}
 #        session upload is a real trade-off.
 source: local
 
+# Minimize the browser window for every command but --login, same as passing
+# --headless. Naukri blocks true headless browsers, so this is a normal browser
+# with its window minimized.
+headless: false
+
 apify: {}
   # token: apify_api_...        # or set APIFY_TOKEN in your environment
   # actor: your-name/naukri-search

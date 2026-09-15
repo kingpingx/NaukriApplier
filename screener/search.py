@@ -75,9 +75,14 @@ def search_url(keyword: str, location: str | None = None,
     return f"{BASE}/{path}?{urlencode(params)}"
 
 
-def _capture(page, url: str, marker: str) -> list[dict]:
-    """Navigate and return the jobDetails from the page's own API call."""
+def _capture(page, url: str, marker: str) -> list[dict] | None:
+    """Navigate and return the jobDetails from the page's own API call.
+
+    None when the navigation itself failed, as opposed to a search that found
+    nothing - so a broken search is reported, not passed off as a quiet one.
+    """
     payloads: list[dict] = []
+    navigated = True
 
     def handler(response):
         if marker not in response.url:
@@ -102,6 +107,7 @@ def _capture(page, url: str, marker: str) -> list[dict]:
             page.mouse.wheel(0, 1600)
             page.wait_for_timeout(3000)
     except Exception as exc:
+        navigated = False
         log.warning("Navigation failed for %s: %s", url, str(exc)[:160])
     finally:
         page.remove_listener("response", handler)
@@ -109,7 +115,7 @@ def _capture(page, url: str, marker: str) -> list[dict]:
     records: list[dict] = []
     for payload in payloads:
         records.extend(payload.get("jobDetails") or [])
-    return records
+    return records if navigated or records else None
 
 
 def _pause() -> None:
@@ -117,9 +123,28 @@ def _pause() -> None:
     time.sleep(random.uniform(2.5, 6.0))
 
 
-def gather(page, config: dict) -> list[Job]:
-    """Run every configured search plus recommendations; dedupe by jobId."""
+def _live(page):
+    """The page, or a fresh one in the same session if it has been closed.
+
+    A scan's page has closed mid-run - from the taskbar, or by the page itself -
+    and every search after it failed instantly while the scan still reported
+    success. The login lives in the context, not the page, so a new page
+    carries on as the same signed-in browser.
+    """
+    if page.is_closed():
+        log.warning("The browser page closed mid-scan - carrying on in a fresh one")
+        page = page.context.new_page()
+    return page
+
+
+def gather(page, config: dict, failed: list[str] | None = None) -> list[Job]:
+    """Run every configured search plus recommendations; dedupe by jobId.
+
+    Labels of searches whose navigation failed are appended to `failed`, so the
+    caller can say "3 searches failed" instead of reporting a thin, quiet day.
+    """
     found: dict[str, Job] = {}
+    failed = [] if failed is None else failed
 
     def absorb(records: list[dict], source: str) -> int:
         added = 0
@@ -132,6 +157,15 @@ def gather(page, config: dict) -> list[Job]:
                 added += 1
         return added
 
+    def fetch(url: str, marker: str, label: str, source: str) -> int:
+        nonlocal page
+        page = _live(page)
+        records = _capture(page, url, marker)
+        if records is None:
+            failed.append(label)
+            return 0
+        return absorb(records, source)
+
     job_age = config.get("posted_within_days")
     job_age = int(job_age) if job_age else None
 
@@ -139,7 +173,7 @@ def gather(page, config: dict) -> list[Job]:
         # The recommendations feed has no freshness facet, so under a date
         # filter most of what it returns is trimmed by the caller's age check.
         log.info("Fetching Naukri's recommendations for your profile")
-        added = absorb(_capture(page, RECOMMENDED_URL, RECOM_API), "recommended")
+        added = fetch(RECOMMENDED_URL, RECOM_API, "recommendations", "recommended")
         log.info("  recommended: +%d", added)
         _pause()
 
@@ -153,7 +187,7 @@ def gather(page, config: dict) -> list[Job]:
             url = search_url(keyword, location, config.get("profile_years"), page_no,
                              job_age=job_age)
             label = f"{keyword}" + (f" in {location}" if location else "") + (f" p{page_no}" if page_no > 1 else "")
-            added = absorb(_capture(page, url, SEARCH_API), f"search:{label}")
+            added = fetch(url, SEARCH_API, label, f"search:{label}")
             log.info("  %s: +%d new (%d total)", label, added, len(found))
             _pause()
 

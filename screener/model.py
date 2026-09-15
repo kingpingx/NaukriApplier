@@ -17,9 +17,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, asdict, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 BASE = "https://www.naukri.com"
+
+# Job pages stamp `createdDate` as a bare "2026-09-07 17:02:05", in IST.
+IST = timezone(timedelta(hours=5, minutes=30))
 
 
 def _placeholder(record: dict, kind: str) -> str | None:
@@ -94,6 +97,33 @@ class Job:
             source=source,
         )
 
+    @classmethod
+    def from_detail(cls, record: dict) -> "Job":
+        """From a job page's own `/jobapi/v4/job/<id>` payload.
+
+        A different shape to the search API's: skills arrive split into
+        `preferred` (the posting's must-haves) and `other`, locations as a list,
+        and the full description rather than a snippet.
+        """
+        key_skills = record.get("keySkills") or {}
+        skills = [str(s.get("label") or "").strip()
+                  for group in ("preferred", "other") for s in key_skills.get(group) or []]
+        places = [str(p.get("label") or "").strip() for p in record.get("locations") or []]
+        return cls(
+            job_id=str(record.get("jobId") or ""),
+            title=(record.get("title") or "").strip(),
+            company=((record.get("companyDetail") or {}).get("name") or "").strip(),
+            url=record.get("staticUrl") or "",
+            skills=[s for s in skills if s],
+            location=", ".join(p for p in places if p) or None,
+            salary_label=(record.get("salaryDetail") or {}).get("label"),
+            min_exp=_as_float(record.get("minimumExperience")),
+            max_exp=_as_float(record.get("maximumExperience")),
+            description=_strip_html(record.get("description")),
+            created_ms=_created_ms(record.get("createdDate")),
+            source="match",
+        )
+
     @property
     def age_days(self) -> float | None:
         """How long ago the job was posted, in days."""
@@ -125,3 +155,11 @@ def _as_float(value) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _created_ms(text) -> int | None:
+    try:
+        stamp = datetime.strptime(str(text), "%Y-%m-%d %H:%M:%S").replace(tzinfo=IST)
+    except (TypeError, ValueError):
+        return None
+    return int(stamp.timestamp() * 1000)

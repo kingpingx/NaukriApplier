@@ -272,30 +272,7 @@ def set_key_skills(page, skills: list[str]) -> dict:
             break
     log.info("Removed %d existing chips", removed)
 
-    added, skipped = [], []
-    for skill in skills:
-        try:
-            _type_first(page, editor["input"], skill, "key skills")
-            page.wait_for_timeout(2200)
-            suggestions = page.locator(S.SKILL_SUGGESTIONS)
-            if suggestions.count():
-                suggestions.first.click(timeout=4000)
-                added.append(skill)
-            else:
-                # No suggestion means Naukri does not know this term. Leaving it
-                # in the box would commit it as a chip on save anyway, so it is
-                # cleared deliberately and reported instead of appearing silently.
-                skipped.append(skill)
-            page.wait_for_timeout(350)
-        except Exception as exc:
-            log.debug("skill %r failed: %s", skill, exc)
-            skipped.append(skill)
-
-    # Anything left in the input becomes a chip on save. Clear it.
-    try:
-        _type_first(page, editor["input"], "", "key skills")
-    except EditError:
-        pass
+    added, skipped = _add_chips(page, editor, skills)
 
     # Every chip was removed above. Saving now, with nothing added, would wipe
     # the key skills off the profile entirely - the single most destructive
@@ -329,6 +306,101 @@ def set_key_skills(page, skills: list[str]) -> dict:
             "skipped": skipped}
 
 
+def add_key_skills(page, skills: list[str]) -> dict:
+    """Add chips alongside the existing ones. Never removes any.
+
+    Not `set_key_skills` with the old list prepended: that clears every chip
+    first, and any existing one Naukri's suggester fails to recognise on
+    re-entry would be lost. Adding in place cannot lose one - and the read-back
+    below proves it rather than assuming it.
+    """
+    editor = S.EDITORS["key_skills"]
+
+    reveal(page)
+    before = _page_chips(page)
+    present = {c.lower() for c in before}
+    wanted = [s for s in skills if s.lower() not in present]
+    if not wanted:
+        return {"field": "key_skills", "before": before, "after": before, "skipped": []}
+
+    _click_first(page, editor["trigger"], "key skills edit")
+    page.wait_for_timeout(1500)
+    added, skipped = _add_chips(page, editor, wanted)
+    if not added:
+        page.keyboard.press("Escape")
+        raise EditError("Naukri's suggester recognised none of: "
+                        f"{', '.join(skipped)}. Nothing was changed.")
+
+    _click_first(page, editor["save"], "key skills save")
+    _settle(page)
+
+    after = _page_chips(page)
+    lost = [c for c in before if c not in after]
+    if lost:
+        raise EditError(f"Key skills saved, but these existing chips are gone: "
+                        f"{', '.join(lost)}. Re-add them on the site.")
+    log.info("Key skills: added %d, now %d chips", len(added), len(after))
+    return {"field": "key_skills", "before": before, "after": after, "skipped": skipped}
+
+
+def _add_chips(page, editor: dict, skills: list[str]) -> tuple[list[str], list[str]]:
+    """Type each skill into the open dialog and click Naukri's suggestion for it.
+
+    Returns (added, skipped). Leaves the input empty, because whatever is left
+    in it gets committed as a chip on save.
+    """
+    added, skipped = [], []
+    for skill in skills:
+        try:
+            _type_first(page, editor["input"], skill, "key skills")
+            match = _pick_suggestion(page, skill)
+            if match is not None:
+                match.click(timeout=4000)
+                added.append(skill)
+            else:
+                # No exact suggestion means Naukri files this term under another
+                # name, or not at all. Leaving it in the box would commit it as a
+                # chip on save anyway, so it is cleared and reported instead.
+                skipped.append(skill)
+            page.wait_for_timeout(350)
+        except Exception as exc:
+            log.debug("skill %r failed: %s", skill, exc)
+            skipped.append(skill)
+
+    # Anything left in the input becomes a chip on save. Clear it.
+    try:
+        _type_first(page, editor["input"], "", "key skills")
+    except EditError:
+        pass
+    return added, skipped
+
+
+# Suggestions land about a second after typing; this is the ceiling, not the norm.
+SUGGESTION_WAIT_MS = 6000
+
+
+def _pick_suggestion(page, skill: str, options_selector: str = S.SKILL_SUGGESTIONS):
+    """The dropdown entry whose text is exactly `skill`, or None.
+
+    Never simply the first entry: typing "Azure" lists "Azure Data Factory"
+    first, and clicking that put a skill on a live profile nobody claimed.
+    """
+    for _ in range(SUGGESTION_WAIT_MS // 500):
+        page.wait_for_timeout(500)
+        options = page.locator(options_selector)
+        index = _exact_index(options.all_inner_texts(), skill)
+        if index is not None:
+            return options.nth(index)
+    return None
+
+
+def _exact_index(options: list[str], skill: str) -> int | None:
+    """Position of the option reading exactly `skill`, ignoring case and spacing."""
+    want = " ".join(skill.split()).lower()
+    return next((i for i, text in enumerate(options)
+                 if " ".join(text.split()).lower() == want), None)
+
+
 def preview(state_path: Path = DEFAULT_STATE, headless: bool = False) -> dict:
     """What the writable fields hold right now. Changes nothing."""
     from playwright.sync_api import sync_playwright
@@ -347,7 +419,7 @@ def preview(state_path: Path = DEFAULT_STATE, headless: bool = False) -> dict:
 
 
 def apply(headline: str | None = None, summary: str | None = None,
-          skills: list[str] | None = None,
+          skills: list[str] | None = None, add_skills: list[str] | None = None,
           state_path: Path = DEFAULT_STATE, headless: bool = False) -> list[dict]:
     """Apply whichever fields were given, in one browser session.
 
@@ -374,6 +446,8 @@ def apply(headline: str | None = None, summary: str | None = None,
                 results.append(set_text_field(page, "profile_summary", summary))
             if skills is not None:
                 results.append(set_key_skills(page, skills))
+            if add_skills:
+                results.append(add_key_skills(page, add_skills))
         finally:
             browser.close()
     return results
@@ -391,7 +465,7 @@ def summarise(results: list[dict]) -> str:
                 f"    now ({len(after)}): {', '.join(after)}",
             ]
             if entry.get("skipped"):
-                lines.append(f"    not recognised by Naukri, so left off: "
+                lines.append(f"    no exact match in Naukri's suggestions, so left off: "
                              f"{', '.join(entry['skipped'])}")
         else:
             lines += [

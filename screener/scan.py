@@ -17,6 +17,7 @@ import logging
 from datetime import date, datetime
 from pathlib import Path
 
+from . import page as page_mod
 from . import score as score_mod
 from .config import ConfigError
 from .ledger import Ledger
@@ -34,6 +35,7 @@ def run(config: dict, *, refresh: bool = False, limit: int | None = None) -> dic
     source = get_source(config)
     log.info("Collecting listings via %s", source.name)
     jobs = source.gather(config)
+    failed = list(getattr(source, "failed", []))
 
     # Supplementary boards are additive, not alternatives: `source:` decides how
     # the main board is reached, and this bolts another one alongside it. A
@@ -55,6 +57,7 @@ def run(config: dict, *, refresh: bool = False, limit: int | None = None) -> dic
             "collected": 0, "seen_before": 0, "rejected": 0,
             "shortlist": [], "review": [], "dropped": [],
             "searches": config.get("searches") or [],
+            "failed_searches": failed,
         }
 
     seen_before = 0
@@ -101,19 +104,27 @@ def run(config: dict, *, refresh: bool = False, limit: int | None = None) -> dic
         "review": [j.to_dict() | {"score": j.score, "why": score_mod.explain(j)} for j in review],
         "dropped": [j.to_dict() | {"score": j.score, "why": score_mod.explain(j)} for j in dropped[:40]],
         "searches": config.get("searches") or [],
+        "failed_searches": failed,
         "_jobs": shortlist + review,   # live objects, stripped before serialising
     }
 
 
 def write(summary: dict, config: dict, *, excel: bool = True, html: bool = True) -> dict[str, Path]:
-    """Persist the scan. Returns {kind: path} for whatever was written."""
+    """Persist the scan. Returns {kind: path} for whatever was written.
+
+    Every file carries the run slot - `results-<day>-r2.json` - so a second scan
+    the same day, which lists only jobs the first had not shown you, adds its own
+    files instead of overwriting the morning's.
+    """
     JOBS_DIR.mkdir(parents=True, exist_ok=True)
     today = date.today().isoformat()
+    run = page_mod.next_run(today)
+    tag = f"{today}-r{run}"
     written: dict[str, Path] = {}
 
     jobs = summary.pop("_jobs", [])
 
-    results_path = JOBS_DIR / f"results-{today}.json"
+    results_path = JOBS_DIR / f"results-{tag}.json"
     results_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False, default=str),
                             encoding="utf-8")
     written["results"] = results_path
@@ -121,7 +132,7 @@ def write(summary: dict, config: dict, *, excel: bool = True, html: bool = True)
     if excel and jobs:
         try:
             from .export import to_excel
-            path = JOBS_DIR / f"job-matches-{today}.xlsx"
+            path = JOBS_DIR / f"job-matches-{tag}.xlsx"
             to_excel(jobs, path, Ledger())
             written["excel"] = path
         except ImportError:
@@ -131,15 +142,13 @@ def write(summary: dict, config: dict, *, excel: bool = True, html: bool = True)
 
     if html and jobs:
         try:
-            from . import page as page_mod
             path = page_mod.build({"shortlist": summary["shortlist"],
-                                   "review": summary["review"]},
-                                  JOBS_DIR / f"openings-{today}.html", today)
+                                   "review": summary["review"]}, today=today, run=run)
             written["html"] = Path(path)
         except Exception as exc:
             log.warning("Could not write the HTML page: %s", exc)
 
-    report_path = JOBS_DIR / f"report-{today}.md"
+    report_path = JOBS_DIR / f"report-{tag}.md"
     report_path.write_text(report(summary, config), encoding="utf-8")
     written["report"] = report_path
 
@@ -205,6 +214,10 @@ def summarise(summary: dict, written: dict[str, Path] | None = None) -> str:
         f"  Worth a read: {len(review)}",
         "",
     ]
+    failed = summary.get("failed_searches") or []
+    if failed:
+        lines += [f"  {len(failed)} search(es) failed: {', '.join(failed)}",
+                  "    See logs/screener.log - this run saw fewer jobs than it should.", ""]
     for job in shortlist[:10]:
         lines.append(f"    {job.get('score'):>5}  {(job.get('title') or '')[:44]:<44}  {(job.get('company') or '')[:26]}")
     if len(shortlist) > 10:
@@ -219,3 +232,23 @@ def summarise(summary: dict, written: dict[str, Path] | None = None) -> str:
             lines.append(f"  {kind:<8} {path}")
     lines.append("")
     return "\n".join(lines)
+
+
+def headline(summary: dict, written: dict[str, Path] | None = None) -> tuple[str, str]:
+    """Title and body for the desktop notification a finished scan sends."""
+    shortlist = summary.get("shortlist") or []
+    review = summary.get("review") or []
+    if not shortlist and not review:
+        title = "Naukri scan: no new matches"
+    else:
+        title = f"Naukri scan: {len(shortlist)} shortlisted, {len(review)} worth a read"
+    lines = [f"{job.get('score') or 0:g}  {job.get('title')} - {job.get('company')}"
+             for job in (shortlist + review)[:3]]
+    failed = summary.get("failed_searches") or []
+    if failed:
+        title += f" - {len(failed)} search{'es' if len(failed) != 1 else ''} failed"
+        lines.append("Failed: " + ", ".join(failed))
+    page = (written or {}).get("html")
+    if page:
+        lines.append(str(page))
+    return title, "\n".join(lines)

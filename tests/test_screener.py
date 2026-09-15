@@ -8,15 +8,27 @@ from __future__ import annotations
 
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from screener import config as config_mod
+from screener import edit as edit_mod
+from screener import itskills as itskills_mod
+from screener import match as match_mod
+from screener import notify as notify_mod
+from screener import page as page_mod
+from screener import projects as projects_mod
 from screener import resume as resume_mod
+from screener import scan as scan_mod
+from screener import schedule as schedule_mod
 from screener import score as score_mod
+from screener import search as search_mod
+from screener import session as session_mod
 from screener.model import Job
 
 
@@ -676,6 +688,268 @@ class TestConfig:
 
 
 # --- privacy ------------------------------------------------------------
+
+class TestProfileRows:
+    """IT-skill and project rows are refused before a browser opens, not after."""
+
+    def test_experience_labels_match_the_dropdowns(self):
+        assert [itskills_mod.years_label(n) for n in (0, 1, 4)] == ["0 Year", "1 Year", "4 Years"]
+        assert [itskills_mod.months_label(n) for n in (0, 1, 11)] == ["0 Month", "1 Month", "11 Months"]
+
+    @pytest.mark.parametrize("row", [("", 2026, None, None), ("C#", 2099, None, None),
+                                     ("C#", 2026, 31, 0), ("C#", 2026, 4, 12),
+                                     ("C#", 2026, None, 3)])
+    def test_rows_the_dialog_cannot_hold_are_refused(self, row):
+        with pytest.raises(edit_mod.EditError):
+            itskills_mod.check(*row)
+
+    def test_a_blank_duration_is_allowed(self):
+        itskills_mod.check("Docker", 2026, None, None)
+
+    def test_listed_matches_whole_cells_not_substrings(self):
+        lines = ["IT skills", "PostgreSQL", "c#"]
+        assert not itskills_mod.listed("SQL", lines)
+        assert itskills_mod.listed("C#", lines)
+
+    def test_a_bad_project_month_is_refused_before_touching_the_page(self):
+        with pytest.raises(edit_mod.EditError):
+            projects_mod.add(None, "T", "details", "Foo", "2026")
+
+    def test_a_finished_project_needs_its_end_year(self):
+        with pytest.raises(edit_mod.EditError):
+            projects_mod.add(None, "T", "details", "Aug", "2026", end_month="Aug")
+
+
+class TestSchedule:
+    def test_times_are_normalised_sorted_and_deduplicated(self):
+        assert schedule_mod.parse_times("18:30, 9:00,09:00") == ["09:00", "18:30"]
+
+    @pytest.mark.parametrize("bad", ["25:00", "9am", "", "09:00,noon"])
+    def test_anything_but_a_clock_time_is_refused(self, bad):
+        with pytest.raises(schedule_mod.ScheduleError):
+            schedule_mod.parse_times(bad)
+
+    def test_timer_fires_at_every_time_and_catches_up_after_sleep(self):
+        unit = schedule_mod.timer_unit(["09:00", "18:30"])
+        assert "OnCalendar=*-*-* 09:00:00" in unit and "OnCalendar=*-*-* 18:30:00" in unit
+        assert "Persistent=true" in unit
+
+    def test_service_runs_a_notifying_scan_from_the_repo(self):
+        unit = schedule_mod.service_unit(Path("/repo"), "/repo/.venv/bin/python")
+        assert "WorkingDirectory=/repo" in unit
+        assert '"/repo/main.py" --scan --notify' in unit
+
+
+class TestNotify:
+    def test_missing_notify_send_is_a_quiet_no_op(self, monkeypatch):
+        monkeypatch.setattr(notify_mod.shutil, "which", lambda name: None)
+        monkeypatch.setattr(notify_mod.subprocess, "run",
+                            lambda *a, **k: pytest.fail("no notifier, so nothing may run"))
+        notify_mod.send("title", "body")
+
+    def test_headline_counts_and_leads_with_the_best_job(self):
+        summary = {"shortlist": [{"score": 85.4, "title": "Dot Net Developer", "company": "Acme"}],
+                   "review": [{"score": 60.0, "title": "C# Developer", "company": "Globex"}]}
+        title, body = scan_mod.headline(summary, {"html": Path("openings-r1.html")})
+        assert title == "Naukri scan: 1 shortlisted, 1 worth a read"
+        assert body.splitlines()[0] == "85.4  Dot Net Developer - Acme"
+        assert body.splitlines()[-1] == "openings-r1.html"
+
+    def test_headline_says_so_when_nothing_is_new(self):
+        title, _ = scan_mod.headline({"shortlist": [], "review": []})
+        assert title == "Naukri scan: no new matches"
+
+    def test_failed_searches_are_named_not_hidden(self):
+        summary = {"shortlist": [], "review": [], "failed_searches": ["C# Developer in Gurugram"]}
+        title, body = scan_mod.headline(summary)
+        assert title == "Naukri scan: no new matches - 1 search failed"
+        assert "C# Developer in Gurugram" in body
+
+
+class TestClosedPage:
+    """A page that closes mid-scan must not silently fail every search after it."""
+
+    def test_a_closed_page_is_replaced_from_the_same_session(self):
+        fresh = SimpleNamespace(is_closed=lambda: False)
+        closed = SimpleNamespace(is_closed=lambda: True,
+                                 context=SimpleNamespace(new_page=lambda: fresh))
+        assert search_mod._live(closed) is fresh
+
+    def test_an_open_page_is_kept(self):
+        page = SimpleNamespace(is_closed=lambda: False)
+        assert search_mod._live(page) is page
+
+
+class TestRunPages:
+    """A second scan the same day adds a page. It must not overwrite the first."""
+
+    DAY = "2026-09-15"
+    RESULTS = {"shortlist": [{"job_id": "1", "title": "A </script> B", "company": "Acme",
+                              "url": "https://www.naukri.com/job-listings-a-1", "score": 80.0}],
+               "review": []}
+
+    @pytest.fixture(autouse=True)
+    def jobs_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(page_mod, "JOBS_DIR", tmp_path)
+        monkeypatch.setattr(page_mod, "SEEN_PATH", tmp_path / "seen.json")
+        return tmp_path
+
+    def test_each_scan_keeps_its_own_page_and_links_the_others(self):
+        first = page_mod.build(self.RESULTS, today=self.DAY)
+        second = page_mod.build(self.RESULTS, today=self.DAY)
+        assert (first.name, second.name) == (f"openings-{self.DAY}-r1.html",
+                                             f"openings-{self.DAY}-r2.html")
+        assert f'href="{second.name}"' in first.read_text(encoding="utf-8"), "r1 must now link r2"
+
+    def test_a_scratch_rebuild_claims_no_slot(self, jobs_dir):
+        page_mod.build(self.RESULTS, out_path=jobs_dir / "scratch.html", today=self.DAY)
+        assert page_mod.next_run(self.DAY) == 1
+
+    def test_markup_in_a_title_cannot_close_the_data_block(self):
+        text = page_mod.build(self.RESULTS, today=self.DAY).read_text(encoding="utf-8")
+        assert "A </script> B" not in text
+        assert "A \\u003c/script> B" in text
+
+
+class TestScoringSplit:
+    """The resume body proves skills. It does not decide which titles are yours."""
+
+    def test_resume_body_is_evidence_not_identity(self, tmp_path):
+        facts = {"skills": ["C#"], "titles": ["Software Engineer"], "years": 4.0,
+                 "text": "Built RabbitMQ pipelines in C#"}
+        config = config_mod.load(tmp_path / "none.yaml", profile=None, resume_facts=facts)
+        assert config["profile_text"] == ""
+        assert "RabbitMQ pipelines" in config["profile_evidence"]
+
+    def test_a_skill_named_only_in_the_resume_body_still_counts(self):
+        config = {**BASE_CONFIG, "profile_skills": [], "profile_text": "",
+                  "profile_evidence": "Scaled RabbitMQ consumers"}
+        assert score_mod.matched_skills(["RabbitMQ"], config) == ["RabbitMQ"]
+
+    def test_title_words_found_only_in_the_resume_body_do_not_score(self):
+        job = make_job(title="Data Engineer")
+        narrow = {**BASE_CONFIG, "must_have_any": ["c#"], "titles": ["Software Engineer"],
+                  "profile_text": "", "profile_evidence": "data pipelines"}
+        wide = {**narrow, "profile_text": "data pipelines"}
+        assert score_mod._title_score(job, narrow, 25) < score_mod._title_score(job, wide, 25)
+
+    def test_filler_tags_are_not_counted_as_matches(self):
+        config = {**BASE_CONFIG, "profile_skills": ["C#"], "profile_text": "software development",
+                  "must_have_any": ["c#"]}
+        job = make_job(skills=["Development", "Software", "C#"], description="c#")
+        score_mod.score(job, config)
+        assert job.matched_skills == ["C#"]
+
+
+class TestHiddenBrowser:
+    """Naukri blocks true headless, so hiding the window must never mean it."""
+
+    def test_the_browser_is_always_headed(self):
+        calls: list[dict] = []
+        fake = SimpleNamespace(chromium=SimpleNamespace(launch=lambda **kw: calls.append(kw)))
+        session_mod.launch(fake)
+        assert calls == [{"headless": False}]
+
+    def test_hiding_minimizes_the_window(self):
+        sent: list[tuple] = []
+
+        def send(method, params=None):
+            sent.append((method, params))
+            return {"windowId": 7}
+
+        page = SimpleNamespace(context=SimpleNamespace(
+            new_cdp_session=lambda pg: SimpleNamespace(send=send)))
+        session_mod.minimize(page)
+        assert sent[-1] == ("Browser.setWindowBounds",
+                            {"windowId": 7, "bounds": {"windowState": "minimized"}})
+
+
+class TestSkillSuggestions:
+    """Adding a key skill must click the suggestion that IS the skill."""
+
+    def test_first_suggestion_is_not_taken_on_trust(self):
+        # Naukri's real dropdown for "Azure" - there is no plain "Azure" in it.
+        options = ["Azure Data Factory", "Azure Active Directory", "Azure DevOps"]
+        assert edit_mod._exact_index(options, "Azure") is None
+
+    def test_exact_match_is_found_wherever_it_sits(self):
+        options = ["Angularjs", "Angular Material", " angular "]
+        assert edit_mod._exact_index(options, "Angular") == 2
+
+
+class TestSymbolLanguages:
+    """C#, C++ and C are three languages. Stripping punctuation made them one."""
+
+    def test_csharp_resume_does_not_cover_c_or_cplusplus(self):
+        config = {**BASE_CONFIG, "profile_skills": ["C#"], "profile_text": ""}
+        assert score_mod.matched_skills(["C++", "C"], config) == []
+
+    def test_csharp_still_matches_its_own_spellings(self):
+        config = {**BASE_CONFIG, "profile_skills": ["C#"], "profile_text": "",
+                  "synonyms": {"c sharp": "c#", "csharp": "c#"}}
+        wanted = ["C#", "c sharp", "CSharp"]
+        assert score_mod.matched_skills(wanted, config) == wanted
+
+
+# --- one opening (--match) ----------------------------------------------
+
+JOB_PAGE = {
+    "jobId": "123456789012",
+    "title": "Dot Net Developer",
+    "staticUrl": "https://www.naukri.com/job-listings-dot-net-developer-acme-pune-3-to-6-years-123456789012",
+    "companyDetail": {"name": "Acme"},
+    "minimumExperience": 3,
+    "maximumExperience": 6,
+    "locations": [{"label": "Pune"}, {"label": "Remote"}],
+    "salaryDetail": {"label": "Not Disclosed"},
+    "createdDate": "2026-09-07 17:02:05",
+    "description": "<p>Build APIs in <b>C#</b></p>",
+    "keySkills": {"preferred": [{"label": "C#"}, {"label": "Entity Framework"}],
+                  "other": [{"label": "Azure"}]},
+}
+
+MATCH_CONFIG = {**BASE_CONFIG, "profile_skills": ["C#", "EF Core", "SQL"], "profile_text": "",
+                "must_have_any": ["c#"], "titles": ["Software Engineer"],
+                "synonyms": {"entity framework": "ef core"}}
+
+
+class TestMatch:
+    def test_job_id_is_read_off_the_url(self):
+        url = JOB_PAGE["staticUrl"] + "?src=jobsearchDesk"
+        assert match_mod.job_id_from_url(url) == "123456789012"
+
+    def test_a_url_that_is_not_a_posting_is_refused(self):
+        with pytest.raises(match_mod.MatchError):
+            match_mod.job_id_from_url("https://www.naukri.com/mnjuser/profile")
+
+    def test_job_page_payload_becomes_a_job(self):
+        job = Job.from_detail(JOB_PAGE)
+        assert job.skills == ["C#", "Entity Framework", "Azure"], "must-haves first"
+        assert (job.company, job.location) == ("Acme", "Pune, Remote")
+        assert (job.min_exp, job.max_exp) == (3.0, 6.0)
+        assert job.description == "Build APIs in C#"
+        # Stamped in IST: 17:02 there is 11:32 UTC.
+        utc = datetime(2026, 9, 7, 11, 32, 5, tzinfo=timezone.utc)
+        assert job.created_ms == int(utc.timestamp() * 1000)
+
+    def test_skills_split_into_have_and_missing(self):
+        result = match_mod.compare(JOB_PAGE, None, MATCH_CONFIG)
+        assert result["have"] == ["C#", "Entity Framework"], "EF Core covers it via the synonym"
+        assert result["missing"] == ["Azure"]
+        assert result["preferred"] == {"C#", "Entity Framework"}
+
+    def test_only_skills_the_cv_backs_are_offered_for_the_profile(self):
+        naukri = {"skillMismatch": "C#,Kubernetes,Entity Framework", "Keyskills": 0}
+        result = match_mod.compare(JOB_PAGE, naukri, MATCH_CONFIG)
+        assert result["fixable"] == ["C#", "Entity Framework"]
+        assert result["gaps"] == ["Kubernetes"], "a skill you lack must never be added"
+
+    def test_summary_carries_both_verdicts(self):
+        naukri = {"skillMismatch": "Kubernetes", "workExperience": True}
+        text = match_mod.summarise(match_mod.compare(JOB_PAGE, naukri, MATCH_CONFIG), MATCH_CONFIG)
+        assert "Azure*" not in text and "Azure" in text, "Azure is not a must-have"
+        assert "C#*" in text and "Kubernetes" in text and "experience yes" in text
+
 
 class TestNoPersonalDataShipped:
     """A public repo must not carry anyone's personal details in it.

@@ -11,7 +11,7 @@ section if any add fails, and an empty section is worse than a stale one.
 
 Field mechanics are the same three traps as everywhere else on this profile:
 
-    suggester   client name, skills - must be TYPED, then a suggestion picked
+    suggester   client name - must be TYPED; a free-text name is kept
     dropdown    month/year - click opens a list, pick by exact label
     radio       status / onsite / employment type - click the <label>
 
@@ -23,8 +23,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from . import selectors as S
-from .edit import EditError, _click_first, _fill_first, _type_first, reveal
+from .edit import EditError, _click_first, _fill_first, reveal
 from .employment import MONTHS, _pick_dropdown, _set_suggester
 
 log = logging.getLogger("screener.projects")
@@ -38,7 +37,6 @@ ADD = ["#add-project",
 TITLE = ["#projectTitle"]
 CLIENT = ["#clientName"]
 DETAILS = ["#projectDetails"]
-SKILLS = ["#skillsUsed"]
 STATUS_FINISHED = ["label[for='finished']"]
 STATUS_INPROGRESS = ["label[for='inprogress']"]
 START_MONTH = "#projStartMonthFor"
@@ -68,12 +66,19 @@ def _end_fields(page) -> tuple[str, str]:
 
 
 def add(page, title: str, details: str, start_month: str, start_year: str,
-        end_month: str, end_year: str, client: str = "Self Practice",
-        skills: list[str] | None = None) -> dict:
-    """Add one finished project. Verifies it appears before returning."""
-    for name, month in (("start", start_month), ("end", end_month)):
+        end_month: str | None = None, end_year: str | None = None,
+        client: str = "Self Practice") -> dict:
+    """Add one project - finished with an end date, in progress without one.
+
+    Verifies it appears before returning.
+    """
+    in_progress = end_month is None and end_year is None
+    dates = [("start", start_month)] + ([] if in_progress else [("end", end_month)])
+    for name, month in dates:
         if month not in MONTHS:
             raise EditError(f"{month!r} is not a month ({name}).")
+    if not in_progress and not end_year:
+        raise EditError("A finished project needs both an end month and an end year.")
 
     reveal(page)
     before = rows(page)
@@ -91,40 +96,26 @@ def add(page, title: str, details: str, start_month: str, start_year: str,
     _fill_first(page, DETAILS, details, "project details")
     _set_suggester(page, CLIENT, client, "client")
 
-    _click_first(page, STATUS_FINISHED, "'Finished'")
+    if in_progress:
+        _click_first(page, STATUS_INPROGRESS, "'In progress'")
+    else:
+        _click_first(page, STATUS_FINISHED, "'Finished'")
     page.wait_for_timeout(1500)
 
     _pick_dropdown(page, START_YEAR, start_year, "project start year")
     _pick_dropdown(page, START_MONTH, start_month, "project start month")
 
-    end_month_sel, end_year_sel = _end_fields(page)
-    _pick_dropdown(page, end_year_sel, end_year, "project end year")
-    _pick_dropdown(page, end_month_sel, end_month, "project end month")
+    if not in_progress:
+        end_month_sel, end_year_sel = _end_fields(page)
+        _pick_dropdown(page, end_year_sel, end_year, "project end year")
+        _pick_dropdown(page, end_month_sel, end_month, "project end month")
 
     # No Escape here. Picking an option already closes its list, and Escape
     # closes the whole dialog - which then reads as "Save button not found".
     page.wait_for_timeout(500)
 
-    # Skills are optional here, and Naukri only accepts ones its suggester
-    # knows. A skill it does not offer is skipped rather than left sitting in
-    # the box, where it would be committed as junk on save.
-    for skill in skills or []:
-        try:
-            _type_first(page, SKILLS, skill, "skills used")
-            page.wait_for_timeout(1800)
-            suggestions = page.locator(S.SKILL_SUGGESTIONS)
-            if suggestions.count():
-                suggestions.first.click(timeout=3000)
-                page.wait_for_timeout(400)
-            else:
-                log.debug("skill %r not offered; skipping", skill)
-        except Exception as exc:
-            log.debug("skill %r failed: %s", skill, exc)
-    try:
-        _type_first(page, SKILLS, "", "skills used")
-    except EditError:
-        pass
-
+    # The dialog used to carry a "skills used" suggester. Naukri removed it
+    # (checked 2026-09-15), so nothing sits between the dates and Save.
     _click_first(page, SAVE, "project save")
     page.wait_for_timeout(3500)
     reveal(page)

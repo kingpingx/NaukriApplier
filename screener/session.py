@@ -88,6 +88,31 @@ def login(state_path: Path = DEFAULT_STATE, timeout_sec: int = 300) -> bool:
         return False
 
 
+# Naukri's Akamai front serves "Access Denied" to every headless mode tried -
+# Playwright's headless shell and Chromium's new headless alike (verified
+# 2026-09-15) - so the browser is always headed, and `headless` minimizes it.
+def launch(p):
+    """A headed Chromium. Never a headless one: Naukri blocks those."""
+    return p.chromium.launch(headless=False)
+
+
+def minimize(page) -> None:
+    """Minimize the window `page` lives in - how `headless` hides a headed browser.
+
+    Parking the window off-screen was tried first: GNOME clamps it back to the
+    top-left corner, where it covered the screen and got closed mid-scan. A
+    minimized window still gets Naukri's results (verified 2026-09-15). Best
+    effort - a window left visible beats a scan that fails over it.
+    """
+    try:
+        cdp = page.context.new_cdp_session(page)
+        window = cdp.send("Browser.getWindowForTarget")["windowId"]
+        cdp.send("Browser.setWindowBounds",
+                 {"windowId": window, "bounds": {"windowState": "minimized"}})
+    except Exception as exc:
+        log.debug("Could not minimize the browser window: %s", exc)
+
+
 def open_profile(p, state_path: Path = DEFAULT_STATE, headless: bool = True):
     """Return (browser, context, page) sitting on the profile page.
 
@@ -103,11 +128,15 @@ def open_profile(p, state_path: Path = DEFAULT_STATE, headless: bool = True):
     except Exception as exc:
         raise NotLoggedIn(f"Session file at {state_path} is unreadable ({exc}). Re-run --login.")
 
-    browser = p.chromium.launch(headless=headless)
+    browser = launch(p)
     context = browser.new_context(
         storage_state=str(state_path),
         viewport={"width": 1440, "height": 900},
     )
+    if headless:
+        # Every page, not only the first: a replacement for a page that closed
+        # mid-scan opens a window of its own.
+        context.on("page", minimize)
     page = context.new_page()
     page.goto(S.PROFILE_URL, wait_until="domcontentloaded")
     page.wait_for_timeout(4000)  # profile widgets lazy-load after first paint

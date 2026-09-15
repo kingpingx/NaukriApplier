@@ -15,7 +15,7 @@ import html
 import json
 import re
 import logging
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 log = logging.getLogger("screener.page")
@@ -58,6 +58,10 @@ def age_days(text: str | None) -> int | None:
     low = str(text).strip().lower()
     if "just now" in low or "today" in low:
         return 0
+    # Naukri's "Few Hours Ago" has no digit for the regex below to find, so it
+    # read as undated and the Posted filters hid the freshest rows on the page.
+    if "hour" in low or "minute" in low:
+        return 0
     if "yesterday" in low:
         return 1
     match = re.search(r"(\d+)\s*\+?\s*(minute|hour|day|week|month|year)", low)
@@ -79,6 +83,22 @@ def _salary_of(card: dict) -> str:
         if any(mark in item for mark in ("/yr", "/hr", "₹", "$", "LPA", "INR")):
             return item
     return ""
+
+
+def created_age_days(created_ms, day: str) -> int | None:
+    """Whole days between Naukri's createdDate and the day the scan ran.
+
+    The posted label is a rounding of this timestamp and loses to it: "30+ Days
+    Ago" can be a year old. Measured against the scan's day, not the wall clock,
+    so rebuilding a stored day gives back that day's ages.
+    """
+    if not created_ms:
+        return None
+    try:
+        posted = datetime.fromtimestamp(created_ms / 1000).date()
+        return (date.fromisoformat(day) - posted).days
+    except (OverflowError, OSError, TypeError, ValueError):
+        return None
 
 
 def build_rows(results: dict, seen: dict, today: str) -> list[dict]:
@@ -115,6 +135,7 @@ def build_rows(results: dict, seen: dict, today: str) -> list[dict]:
         job_id = raw if ":" in raw else f"naukri:{raw}"
         first = seen.setdefault(job_id, today)
         location = job.get("location") or ""
+        age = created_age_days(job.get("created_ms"), today)
         rows.append({
             "id": job_id,
             "board": "Himalayas" if job.get("source") == "himalayas" else "Naukri",
@@ -124,7 +145,7 @@ def build_rows(results: dict, seen: dict, today: str) -> list[dict]:
             "salary": job.get("salary_label") or "",
             "experience": job.get("experience_label") or "",
             "posted": job.get("posted_label") or "",
-            "age": age_days(job.get("posted_label")),
+            "age": age if age is not None else age_days(job.get("posted_label")),
             "rank": job.get("score"),
             "rank_label": "score",
             "url": job.get("url") or "",
@@ -242,6 +263,21 @@ TEMPLATE = """<title>__TITLE__</title>
     margin: 0; letter-spacing: -.02em; text-wrap: balance;
   }
   .sub { color: var(--muted); max-width: 62ch; }
+  /* Each scan of the day keeps its own page; this is how the evening page gets
+     back to the morning one. */
+  nav.runs {
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline;
+    margin: 0 0 16px; font: 400 12.5px/1.6 "Source Sans 3", sans-serif;
+  }
+  nav.runs .label { color: var(--muted); margin-right: 2px; }
+  nav.runs a, nav.runs span.here {
+    padding: 3px 9px; border-radius: 999px; text-decoration: none;
+    border: 1px solid var(--line); color: var(--muted);
+    font: 500 12.5px/1.6 "IBM Plex Mono", monospace;
+  }
+  nav.runs a:hover { color: var(--ink); background: var(--surface-2); }
+  nav.runs span.here { color: var(--ink); border-color: var(--accent); background: var(--surface-2); }
+  nav.runs .sep { color: var(--line); padding: 0 4px; }
 
   .stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 22px 0 18px; }
   .stat {
@@ -352,6 +388,8 @@ TEMPLATE = """<title>__TITLE__</title>
 </style>
 
 <div class="wrap">
+  <nav class="runs">__RUNS__</nav>
+
   <header>
     <div class="eyebrow">__DATELINE__ &middot; __SCOPE__</div>
     <h1>__HEADING__</h1>
@@ -449,7 +487,7 @@ TEMPLATE = """<title>__TITLE__</title>
           '<div class="tags">' + tags + '</div>' +
           (r.note ? '<div class="note">' + esc(r.note) + '</div>' : '') +
         '</div>' +
-        '<div class="meta"><div>' + esc(r.location || '&mdash;') + '</div>' +
+        '<div class="meta"><div>' + (r.location ? esc(r.location) : '&mdash;') + '</div>' +
           (r.salary ? '<div>' + esc(r.salary) + '</div>' : '') + '</div>' +
         '<div class="meta">' + (r.experience ? '<div>' + esc(r.experience) + '</div>' : '') +
           (r.posted ? '<div>' + esc(r.posted) + '</div>' : '') + '</div>' +
@@ -546,8 +584,93 @@ TEMPLATE = """<title>__TITLE__</title>
 """
 
 
-def build(results: dict, out_path: Path | None = None, today: str | None = None) -> Path:
-    """Write the dated tracker page. Returns the path."""
+def day_runs(day: str) -> list[Path]:
+    """Every tracker page written for `day`, oldest run first.
+
+    Includes the un-suffixed `openings-<day>.html` written before run slots
+    existed, so those days stay reachable from the picker.
+    """
+    runs = sorted(JOBS_DIR.glob(f"openings-{day}-r*.html"),
+                  key=lambda p: int(p.stem.rsplit("-r", 1)[1]))
+    legacy = JOBS_DIR / f"openings-{day}.html"
+    return ([legacy] if legacy.exists() else []) + runs
+
+
+def next_run(day: str) -> int:
+    """The run slot this scan should claim.
+
+    Every scan used to write `openings-<day>.html`, so an evening scan destroyed
+    the morning's page. Counted over every file a run writes, not only pages,
+    so a --no-html scan still takes a slot of its own.
+    """
+    used = [int(slot) for p in JOBS_DIR.glob(f"*-{day}-r*")
+            if (slot := p.stem.rsplit("-r", 1)[1]).isdigit()]
+    return max(used) + 1 if used else 1
+
+
+def _run_label(path: Path) -> str:
+    stem = path.stem
+    return f"r{stem.rsplit('-r', 1)[1]}" if "-r" in stem else "r0"
+
+
+def runs_nav(day: str, this_name: str, extra: str | None = None) -> str:
+    """The picker: every scan of `day`, then the four days before it.
+
+    `extra` names a page about to be written and so not on disk yet - without
+    it the run doing the writing would leave itself out of its own picker.
+    """
+    names = [p.name for p in day_runs(day)]
+    if extra and extra not in names:
+        names.append(extra)
+    names.sort(key=lambda n: int(n.rsplit("-r", 1)[1].split(".")[0]) if "-r" in n else 0)
+
+    parts = ['<span class="label">Today&rsquo;s scans</span>']
+    for name in names:
+        label = _run_label(Path(name))
+        parts.append(f'<span class="here">{html.escape(label)}</span>' if name == this_name
+                     else f'<a href="{html.escape(name)}">{html.escape(label)}</a>')
+
+    earlier = sorted({p.name.replace("openings-", "").split("-r")[0].replace(".html", "")
+                      for p in JOBS_DIR.glob("openings-*.html")} - {day}, reverse=True)[:4]
+    if earlier:
+        parts.append('<span class="sep">|</span>')
+        for past in earlier:
+            pages = day_runs(past)
+            if pages:
+                parts.append(f'<a href="{html.escape(pages[-1].name)}">{html.escape(past[5:])}</a>')
+    return "\n    ".join(parts)
+
+
+_RUNS_NAV_RE = re.compile(r'(<nav class="runs">)(.*?)(</nav>)', re.S)
+
+
+def refresh_run_navs(day: str) -> int:
+    """Re-point every earlier page of `day` at the runs that now exist.
+
+    A page written in the morning cannot link to the evening run, which did not
+    exist yet - so each run rewrites the picker of the pages before it. Only the
+    nav block is touched; the rows, counts and tick state are that run's record.
+    """
+    patched = 0
+    for path in day_runs(day):
+        text = path.read_text(encoding="utf-8")
+        replacement = runs_nav(day, path.name)
+        updated, count = _RUNS_NAV_RE.subn(
+            lambda m: m.group(1) + "\n    " + replacement + "\n  " + m.group(3), text)
+        if count and updated != text:
+            path.write_text(updated, encoding="utf-8")
+            patched += 1
+    return patched
+
+
+def build(results: dict, out_path: Path | None = None, today: str | None = None,
+          run: int | None = None) -> Path:
+    """Write this run's tracker page and re-point the day's earlier pages at it.
+
+    Without `out_path` the page claims a run slot, `openings-<day>-r<N>.html`,
+    so a second scan the same day adds a page instead of overwriting the first.
+    An explicit `out_path` is a scratch rebuild: no slot, no other page touched.
+    """
     today = today or date.today().isoformat()
     seen = load_seen()
     rows = build_rows(results, seen, today)
@@ -574,22 +697,34 @@ def build(results: dict, out_path: Path | None = None, today: str | None = None)
         if undated else "Every listing carries a posted date."
     )
 
+    is_real_run = out_path is None
+    this_run = next_run(today) if run is None else run
+    this_name = f"openings-{today}-r{this_run}.html" if is_real_run else out_path.name
+    runs_html = runs_nav(today, this_name, extra=this_name if is_real_run else None)
+
     page = (TEMPLATE
-            .replace("__TITLE__", f"Job Openings {today}")
+            .replace("__RUNS__", runs_html)
+            .replace("__TITLE__", f"Job Openings {today} r{this_run}")
             .replace("__HEADING__", f"{len(rows)} openings, {new_count} new today")
-            .replace("__DATELINE__", today)
+            .replace("__DATELINE__", f"{today} &middot; scan {this_run}")
             .replace("__SCOPE__", scope_html)
             .replace("__GENERATED__", today)
             .replace("__NAUKRI_N__", str(len(results.get("naukri") or [])))
             .replace("__LINKEDIN_N__", str(len(results.get("linkedin") or [])))
             .replace("__TODAY__", today)
             .replace("__UNDATED_NOTE__", undated_note)
-            .replace("__DATA__", json.dumps(rows, ensure_ascii=False)))
+            # json.dumps leaves "<" alone, and "</script" is the one sequence
+            # that ends the data block early - a pasted JD must not break the page.
+            .replace("__DATA__", json.dumps(rows, ensure_ascii=False).replace("<", "\\u003c")))
 
-    out_path = out_path or (JOBS_DIR / f"openings-{today}.html")
+    out_path = out_path or (JOBS_DIR / this_name)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(page, encoding="utf-8")
     log.info("Wrote %d row(s) (%d new) to %s", len(rows), new_count, out_path)
+    # Only a real run re-points other pages; a scratch rebuild must not reach
+    # into data/jobs and rewrite pages it is not part of.
+    if is_real_run:
+        refresh_run_navs(today)
     return out_path
 
 

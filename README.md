@@ -274,6 +274,55 @@ Two things worth knowing before you run it: the filename is shown to recruiters,
 which is what `--as-name` is for, and the upload bumps your profile's freshness
 date - normally what you want, since recency drives recruiter search ranking.
 
+### Check one opening before you apply
+
+```bash
+python main.py --match "https://www.naukri.com/job-listings-...-123456789012"
+python main.py --match "<job url>" --cv tailored_cv.pdf    # check a different CV
+```
+
+Two verdicts for that one job:
+
+- **Yours** - the CV scored exactly as `--scan` would, with the job's key skills
+  split into what you have and what you lack, its must-haves starred.
+- **Naukri's** - the site's own match check against your *live profile*. It
+  reads your key-skill chips, not the resume file, and it is what a recruiter's
+  filtered search sees.
+
+Where they disagree - your CV has C#, Naukri says you lack it - your profile is
+stale, and it offers to add those skills to your Naukri key skills. Where both
+say a skill is missing it is reported as a gap and never added: claiming a
+skill you don't have is the same line as answering screening questions for you.
+
+With `--cv`, it then offers to replace the resume on your profile with that
+file. Both writes ask first and default to no, and adding key skills never
+removes an existing one. A `--cv` file is only parsed for the check -
+`data/resume.json` is left as it is.
+
+## Run it on a schedule
+
+```bash
+python main.py --schedule 09:00,13:00,18:00    # any times, 24-hour
+python main.py --unschedule
+```
+
+On Linux this installs a systemd user timer that runs `--scan --notify` at those
+times. `--notify` pops up a desktop notification when a scan starts, when it
+finishes (with the top matches), and when it fails - an expired login says so
+instead of quietly finding nothing.
+
+- It runs only while you are logged in: the browser needs your display, even
+  minimized.
+- A scan that fell due while the laptop slept runs when it wakes.
+- Each scan keeps its own files - `openings-<date>-r1.html`, `-r2`, ... - and
+  every page links to the day's other scans. Later scans the same day list only
+  jobs the earlier ones had not shown you.
+- Output of scheduled runs: `journalctl --user -u naukri-scan`.
+
+On Windows or macOS no timer is installed for you: point Task Scheduler or
+launchd at `python main.py --scan --notify` in the repo folder, for a logged-in
+session.
+
 ## Where jobs come from
 
 ```yaml
@@ -281,7 +330,9 @@ source: local     # default
 ```
 
 **`local`** — Playwright on your machine with your saved session. Works after a
-`pip install`. This is the one to use.
+`pip install`. This is the one to use. Add `--headless` to any command except
+`--login` to minimize the browser window, or set `headless: true` in
+`config.yaml` to make that the default.
 
 **`apify`** — the same navigation, in an Apify actor in the cloud. The only real
 advantage is that a scheduled run happens whether or not your laptop is open.
@@ -327,8 +378,9 @@ export SCREENER_HOME=~/.naukri-screener      # or $env:SCREENER_HOME on Windows
 ## Troubleshooting
 
 **"Access Denied" / every search returns nothing**
-Naukri sits behind Akamai, which blocks headless Chromium. Do not pass
-`--headless`. If it persists, your session has probably expired — re-run
+Naukri sits behind Akamai, which blocks every true headless mode. `--headless`
+here does not use one: it runs a normal browser and minimizes its window,
+which Naukri allows. If it persists, your session has probably expired — re-run
 `--login`.
 
 **"Saved session has expired"**

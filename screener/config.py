@@ -54,6 +54,7 @@ DEFAULTS = {
 
     # --- where jobs come from --------------------------------------------
     "source": "local",             # local | apify
+    "headless": False,             # minimize the browser window - see session.minimize
     "include_linkedin": False,
     "include_himalayas": False,    # add worldwide-remote listings to the run
     "himalayas": {},               # pages: how deep to page the feed
@@ -472,7 +473,12 @@ def load(path: Path = CONFIG_PATH,
     titles: list[str] = []
     years: float | None = None
     location: str | None = None
-    text_parts: list[str] = []
+    # Two texts, because they answer different questions. Title scoring treats
+    # every word of `profile_text` as "a title word that is yours", so a whole
+    # resume there lets almost any job title match. The resume body is still
+    # the best evidence of a skill, so it goes in `profile_evidence` instead.
+    identity: list[str] = []
+    evidence: list[str] = []
 
     if resume_facts:
         skills += resume_facts.get("skills") or []
@@ -480,7 +486,7 @@ def load(path: Path = CONFIG_PATH,
         titles += resume_facts.get("titles") or []
         years = resume_facts.get("years")
         location = resume_facts.get("location")
-        text_parts.append(resume_facts.get("text") or "")
+        evidence.append(resume_facts.get("text") or "")
 
     if profile:
         skills += profile_skills(profile)
@@ -492,8 +498,11 @@ def load(path: Path = CONFIG_PATH,
             titles.insert(0, designation)
         years = profile_years(profile) or years
         location = (profile.get("location") or "").split(",")[0].strip() or location
-        text_parts += [str(profile.get(f) or "") for f in
-                       ("resume_headline", "profile_summary", "current_designation")]
+        identity += [str(profile.get(f) or "") for f in
+                     ("resume_headline", "profile_summary", "current_designation")]
+        for field in ("career_profile", "employment", "projects", "it_skills"):
+            value = profile.get(field) or ""
+            evidence.append(" ".join(map(str, value)) if isinstance(value, list) else str(value))
 
     # User overrides sit on top of everything derived.
     skills += user.get("skills") or []
@@ -506,7 +515,8 @@ def load(path: Path = CONFIG_PATH,
     config["skill_years"] = skill_years
     config["profile_years"] = years
     config["titles"] = _dedupe(titles)
-    config["profile_text"] = " ".join(p for p in text_parts if p)[:20000]
+    config["profile_text"] = " ".join(p for p in identity if p)
+    config["profile_evidence"] = " ".join(p for p in identity + evidence if p)[:20000]
     config["vocabulary"] = vocabulary
     config["role_description"] = pack.get("description")
 

@@ -78,12 +78,16 @@ def _pick_dropdown(page, selector: str, value: str, what: str) -> None:
     field = page.locator(selector).first
     if not field.count():
         raise EditError(f"Could not find the {what} field ({selector}).")
-    field.scroll_into_view_if_needed(timeout=6000)
-    field.click(timeout=6000)
-    page.wait_for_timeout(1200)
-
     field_id = selector.lstrip("#")
-    outcome = page.evaluate(_PICK_JS, [value, field_id])
+    # Two tries: when another list is still open, the first click only closes
+    # it and this one never opens - that failed the first IT-skill row live.
+    for _ in range(2):
+        field.scroll_into_view_if_needed(timeout=6000)
+        field.click(timeout=6000)
+        page.wait_for_timeout(1200)
+        outcome = page.evaluate(_PICK_JS, [value, field_id])
+        if str(outcome).startswith("ok"):
+            break
     if not str(outcome).startswith("ok"):
         raise EditError(
             f"'{value}' was not offered in the {what} dropdown ({outcome}). "

@@ -62,9 +62,16 @@ def _synonyms(config: dict) -> dict:
                                 for k, v in (config.get("synonyms") or {}).items()}}
 
 
+# Spelled out after the synonyms, before punctuation is stripped. Stripping
+# first folded C#, C++ and C into the one token "c", so a C# resume matched
+# every C and C++ job. Not in BASE_SYNONYMS: a pack's own synonyms run after
+# those and fold "csharp" straight back into "c#".
+SYMBOL_LANGUAGES = {"c#": "csharp", "c++": "cplusplus", "f#": "fsharp"}
+
+
 def _norm(text: str, synonyms: dict) -> str:
     text = (text or "").lower()
-    for term, replacement in synonyms.items():
+    for term, replacement in [*synonyms.items(), *SYMBOL_LANGUAGES.items()]:
         text = re.sub(rf"(?<![\w+#]){re.escape(term)}(?![\w+#])", replacement, text)
     return re.sub(r"[^a-z0-9 ]+", " ", text)
 
@@ -80,8 +87,8 @@ def _skill_key(skill: str, synonyms: dict) -> str:
 def _gate_hit(term: str, haystack: str, synonyms: dict) -> bool:
     """Whether a `must_have_any` term appears in a job, as a word.
 
-    Normalising strips the punctuation, so "c#" becomes the single letter "c" -
-    and a plain `in` then finds it inside "data scientist". One term like that
+    A short term like "R" normalises to the single letter "r" - and a plain
+    `in` then finds it inside "developer". One term like that
     in the gate lets every job through and the gate silently stops working, so
     the match is anchored to word boundaries, and a term normalising to a single
     character is only ever matched as a whole word.
@@ -186,10 +193,33 @@ def _salary_lpa(job) -> float | None:
         return None
 
 
+# Tags Naukri postings carry that name no skill. The resume body is skill
+# evidence, and it says "development" and "software" like every resume does, so
+# these matched every posting and lifted weak ones onto the shortlist.
+# ponytail: a fixed list; add to it when a filler tag shows up in `matched:`.
+GENERIC_TAGS = {"development", "software", "software development", "software engineering",
+                "engineering", "cloud", "core", "cd", "coding", "programming", "technology",
+                "it", "microsoft"}
+
+
+def matched_skills(wanted: list[str], config: dict) -> list[str]:
+    """The skills in `wanted` your profile covers - by skill list, or by resume text."""
+    synonyms = _synonyms(config)
+    have = {_skill_key(s, synonyms) for s in config.get("profile_skills") or []}
+    evidence = config.get("profile_evidence") or config.get("profile_text", "")
+    have_blob = " ".join(have) + " " + _norm(evidence, synonyms)
+    matched = []
+    for skill in wanted:
+        key = _skill_key(skill, synonyms)
+        if key and (key in have or re.search(rf"\b{re.escape(key)}\b", have_blob)):
+            matched.append(skill)
+    return matched
+
+
 def _skill_score(job, config: dict, cap: float) -> tuple[float, list[str]]:
     """Fraction of the job's asks that you cover, scaled to the skills weight."""
-    synonyms = _synonyms(config)
-    wanted = [s for s in (job.skills or []) if s.strip()]
+    wanted = [s for s in (job.skills or [])
+              if s.strip() and s.strip().lower() not in GENERIC_TAGS]
     if not wanted:
         # No stated skills: fall back to the description so a well-written
         # posting without a tag list is not scored as if it asked for nothing.
@@ -197,17 +227,7 @@ def _skill_score(job, config: dict, cap: float) -> tuple[float, list[str]]:
     if not wanted:
         return round(cap * 0.4, 1), []   # neutral: neither reward nor punish
 
-    have = {_skill_key(s, synonyms) for s in config.get("profile_skills") or []}
-    have_blob = " ".join(have) + " " + _norm(config.get("profile_text", ""), synonyms)
-
-    matched = []
-    for skill in wanted:
-        key = _skill_key(skill, synonyms)
-        if not key:
-            continue
-        if key in have or re.search(rf"\b{re.escape(key)}\b", have_blob):
-            matched.append(skill)
-
+    matched = matched_skills(wanted, config)
     ratio = len(matched) / len(wanted)
     # A job asking for 3 things you all have is weaker evidence than one asking
     # for 10 of which you have 8, so temper the ratio with the absolute count.
