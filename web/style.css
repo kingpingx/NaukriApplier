@@ -112,6 +112,17 @@ button { font: inherit; cursor: pointer; border-radius: 8px; }
 .done { font-weight: 400; font-size: 13px; white-space: nowrap; display: flex; align-items: center; }
 .empty { color: var(--muted); }
 
+.resume-box { margin: 0 0 14px; }
+.resume-box input[type="file"] { background: transparent; border-style: dashed; }
+.resume-summary { margin: 10px 0 6px; font-weight: 600; }
+.row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.row .ghost { margin-top: 0; }
+.gh { margin-top: 10px; }
+.gh > summary { cursor: pointer; font-size: 13.5px; font-weight: 600; }
+.gh .grid { margin-top: 8px; }
+.gh .primary { margin-top: 10px; padding: 7px 16px; }
+.bad-text { color: var(--bad) !important; }
+
 .foot { margin-top: 32px; color: var(--muted); font-size: 12.5px; }
 
 @media (max-width: 560px) {

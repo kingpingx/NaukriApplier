@@ -598,6 +598,89 @@ function showTab(name) {
   if (name === 'scan') loadScan();
 }
 
+// --- resume upload and the RESUME_JSON secret ---------------------------
+
+const GH_KEY = 'jobscout.github';
+let parsedResume = null;
+
+function applyResume(r) {
+  $('#skills').value = r.skills.join(', ');
+  if (r.years != null) $('#years').value = r.years;
+  if (r.titles.length) $('#titles').value = r.titles.join(', ');
+  if (r.location && !$('#cities').value.trim()) $('#cities').value = r.location;
+  $('#resume').value = r.text;
+  persist();
+  $('#resumeOut').hidden = false;
+  $('#resumeSummary').textContent =
+    `${r.skills.length} skills · ${r.years != null ? r.years + ' years' : 'years not found'} · ` +
+    `${r.titles[0] || 'no title found'} · ${r.location || 'no city found'}. Contact details removed.`;
+}
+
+function ghStatus(text, bad) {
+  $('#ghStatus').textContent = text;
+  $('#ghStatus').classList.toggle('bad-text', !!bad);
+}
+
+function wireResume() {
+  const saved = load(GH_KEY, {});
+  $('#ghRepo').value = saved.repo || GitHubSecrets.guessRepo();
+  if (saved.token) { $('#ghToken').value = saved.token; $('#ghRemember').checked = true; }
+  const repo = $('#ghRepo').value.trim();
+  if (repo) {
+    $('#secretsLink').href = `https://github.com/${repo}/settings/secrets/actions`;
+    $('#secretsLink').hidden = false;
+  }
+
+  $('#resumeFile').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    $('#resumeOut').hidden = false;
+    $('#resumeSummary').textContent = 'Reading…';
+    try {
+      const text = await ResumeParser.readFile(file);
+      const pack = PACKS[$('#pack').value] || {};
+      parsedResume = ResumeParser.parse(text, pack.vocabulary || []);
+      applyResume(parsedResume);
+    } catch (err) {
+      parsedResume = null;
+      $('#resumeSummary').textContent = `Could not read it: ${err.message || err}`;
+    }
+  });
+
+  $('#copyJson').addEventListener('click', async () => {
+    if (!parsedResume) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(parsedResume));
+      ghStatus('Copied. Paste it as the RESUME_JSON secret.');
+    } catch {
+      ghStatus('Your browser blocked the clipboard - use Save to GitHub instead.', true);
+    }
+  });
+
+  $('#ghSave').addEventListener('click', async () => {
+    const repoName = $('#ghRepo').value.trim();
+    const token = $('#ghToken').value.trim();
+    if (!parsedResume) return ghStatus('Choose your resume file first.', true);
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repoName)) return ghStatus('Repository should look like owner/repo.', true);
+    if (!token) return ghStatus('Paste an access token first.', true);
+    save(GH_KEY, { repo: repoName, ...($('#ghRemember').checked ? { token } : {}) });
+    $('#ghSave').disabled = true;
+    try {
+      ghStatus('Encrypting and saving RESUME_JSON…');
+      await GitHubSecrets.saveSecret(repoName, token, 'RESUME_JSON', JSON.stringify(parsedResume));
+      ghStatus('Saved. Starting a scan…');
+      try {
+        await GitHubSecrets.runScan(repoName, token);
+        ghStatus('Saved, and a scan has started. The Scheduled scan tab updates in about 3 minutes.');
+      } catch (err) {
+        ghStatus(`Saved, but the scan could not start (${err.message}). It will use the new resume on its next run.`, true);
+      }
+    } catch (err) {
+      ghStatus(err.message || String(err), true);
+    } finally { $('#ghSave').disabled = false; }
+  });
+}
+
 // --- boot ---------------------------------------------------------------
 
 async function boot() {
@@ -616,7 +699,8 @@ async function boot() {
   }
   $('#profile-line').textContent = profileLine(readForm());
 
-  $('#form').addEventListener('input', persist);
+  wireResume();
+  $('#form').addEventListener('input', (e) => { if (!e.target.closest('.gh, #resumeFile')) persist(); });
   $('#go').addEventListener('click', search);
   $('#filter').addEventListener('input', render);
   $('#showLow').addEventListener('change', render);

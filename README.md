@@ -417,6 +417,21 @@ To turn it on:
 3. Run **Actions → Scan and publish → Run workflow** once. After that it runs
    on its own.
 
+**Updating your resume from the site.** In **Search now → Your profile →
+Resume**, choose your PDF. The page reads it itself, using a JavaScript port of
+`screener/resume.py`, and the file is not uploaded anywhere. Contact details are
+removed, and your skills, years and titles are filled in for the live search.
+You then have two options:
+
+- **Copy JSON**, then paste it into the `RESUME_JSON` secret yourself.
+- **Save to GitHub and rescan**. The page encrypts the JSON with the repo's
+  public key, writes the `RESUME_JSON` secret through GitHub's API, and starts
+  a scan. This needs a
+  [fine-grained token](https://github.com/settings/personal-access-tokens/new)
+  with access to this repository only, and **Secrets: read and write** plus
+  **Actions: read and write**. The token is kept in your browser only if you
+  tick *Remember*.
+
 Anyone can read a public repo's Actions logs. The workflow sends the scan's
 output to a file and prints only the counts, so your searches and cities never
 appear in them. Secrets are never printed.

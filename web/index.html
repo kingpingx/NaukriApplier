@@ -25,6 +25,32 @@
     <details id="settings" class="card settings">
       <summary><span>Your profile and boards</span><span id="profile-line" class="muted"></span></summary>
       <form id="form" autocomplete="off">
+        <fieldset class="resume-box">
+          <legend>Resume</legend>
+          <input type="file" id="resumeFile" accept=".pdf,.txt,.md,application/pdf,text/plain">
+          <small>Read inside this page - the file is not uploaded anywhere. Fills in your skills, years and titles below.</small>
+          <div id="resumeOut" hidden>
+            <p id="resumeSummary" class="resume-summary"></p>
+            <div class="row">
+              <button type="button" id="copyJson" class="ghost small">Copy JSON</button>
+              <a id="secretsLink" class="small" target="_blank" rel="noopener" hidden>Open the repo's secrets page</a>
+            </div>
+            <details class="gh">
+              <summary>Save to GitHub - update the scheduled scan's resume</summary>
+              <div class="grid">
+                <label>Repository <input id="ghRepo" placeholder="owner/repo"></label>
+                <label>Access token <input id="ghToken" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_..."></label>
+              </div>
+              <small>A <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a>
+                with access to this repository only, and <em>Secrets: read and write</em> plus <em>Actions: read and write</em>.
+                The resume is encrypted in this page before it is sent.</small>
+              <label class="toggle"><input type="checkbox" id="ghRemember"> Remember the token on this device</label>
+              <button type="button" id="ghSave" class="primary small">Save to GitHub and rescan</button>
+              <p id="ghStatus" class="muted" aria-live="polite"></p>
+            </details>
+          </div>
+        </fieldset>
+
         <div class="grid">
           <label>Role pack
             <select id="pack"></select>
@@ -99,6 +125,8 @@
     Naukri is scanned only on your own machine: <code>python main.py --scan</code>.
   </footer>
 </div>
+<script src="resume.js"></script>
+<script src="github.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
