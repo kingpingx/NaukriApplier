@@ -140,18 +140,18 @@ def _edit_trigger(heading: str) -> str:
 
 EDITORS: dict[str, dict[str, list[str]]] = {
     "resume_headline": {
-        "trigger": [_edit_trigger("Resume headline"), "#lazyResumeHead .edit.icon"],
+        "trigger": [_edit_trigger("Resume headline"), "#lazyResumeHead .widgetHead .edit.icon", "#lazyResumeHead .edit.icon"],
         "input": ["#resumeHeadlineTxt", "textarea[name='resumeHeadline']"],
         # Note: btn-dark-ot, not btn-dark-ob. Only one Save is visible at a time.
         "save": ["#saveHeadline", "button.btn-dark-ot:visible", "button:has-text('Save'):visible"],
     },
     "profile_summary": {
-        "trigger": [_edit_trigger("Profile summary"), "#lazyProfileSummary .edit.icon"],
+        "trigger": [_edit_trigger("Profile summary"), "#lazyProfileSummary .widgetHead .edit.icon", "#lazyProfileSummary .edit.icon"],
         "input": ["#profileSummaryTxt", "textarea[name='profileSummary']"],
         "save": ["#saveSummary", "button.btn-dark-ot:visible", "button:has-text('Save'):visible"],
     },
     "key_skills": {
-        "trigger": [_edit_trigger("Key skills"), "#lazyKeySkills .edit.icon"],
+        "trigger": [_edit_trigger("Key skills"), "#lazyKeySkills .widgetHead .edit.icon", "#lazyKeySkills .edit.icon"],
         "input": ["#keySkillSugg", "input[name='suggestor']"],
         "save": ["#saveKeySkills", "button.btn-dark-ot:visible", "button:has-text('Save'):visible"],
     },
@@ -269,3 +269,69 @@ CHATBOT_SUCCESS = [
     "text=/application (has been )?(sent|submitted)/i",
     "text=/thank you for applying/i",
 ]
+
+
+# ------------------------------------------------------------- resume upload
+#
+# Verified against the live DOM on 2026-08-28. The control a user clicks is an
+# `<input type="button" value="Update resume">` decoy; the real file input is
+# `#attachCV` beside it, and that is what the path must be set on.
+#
+# There is a `deleteOneTheme` icon in the same widget. Nothing here goes near
+# it - replacing a resume is an upload, never a delete-then-upload, so a failed
+# run leaves the existing file in place rather than no file at all.
+RESUME_FILE_INPUT = [
+    "#attachCV",
+    "#lazyAttachCV input[type='file']",
+]
+
+# The filename Naukri shows back, which is what recruiters see. Changing from
+# the old name to the new one is the definitive proof an upload landed - more
+# reliable than a toast, which does not always fire.
+RESUME_NAME = [
+    "#lazyAttachCV .cvPreview .resume-name-inline .truncate",
+    "#lazyAttachCV .cvPreview .truncate.exten",
+]
+
+RESUME_UPLOADED_ON = [
+    "#lazyAttachCV .cvPreview .updateOn",
+]
+
+# Where upload errors are rendered - a rejected file reports here, not as a
+# thrown exception, so it has to be read deliberately.
+RESUME_MSG_BOX = "#attachCVMsgBox"
+
+# Naukri's own stated limits, printed under the upload button. Checked locally
+# before the browser opens: a file that breaches them is rejected server-side
+# with a message that is easy to miss, and the old resume silently survives.
+RESUME_FORMATS = (".doc", ".docx", ".rtf", ".pdf")
+RESUME_MAX_BYTES = 2 * 1024 * 1024
+
+
+# ---------------------------------------------------------------- employment
+#
+# Verified against the live DOM on 2026-08-28. This is the section that decides
+# the "Experience" figure in your header - Naukri derives total experience from
+# these records, so a stale one left marked "to Present" is what makes an
+# experienced candidate show up as a Fresher and drop out of every filtered
+# recruiter search.
+EMPLOYMENT_ADD = ["#add-employment"]
+EMPLOYMENT_ROWS = "#lazyEmployment .row.emp-list"
+EMPLOYMENT_ROW_EDIT = ".edit.icon"
+
+# The dialog. Company and designation are suggester inputs - they need typing,
+# not filling, exactly like the key-skills box. The date fields are dropdown
+# widgets that render a list on click; their text input is read-only in effect.
+EMPLOYMENT_COMPANY = ["#companySugg"]
+EMPLOYMENT_DESIGNATION = ["#designationSugg"]
+EMPLOYMENT_IS_CURRENT_YES = ["label[for='yes']"]
+EMPLOYMENT_IS_CURRENT_NO = ["label[for='no']"]
+EMPLOYMENT_START_MONTH = "#startedMonthFor"
+EMPLOYMENT_START_YEAR = "#startedYearFor"
+# These two only exist once "currently working here" is answered No.
+EMPLOYMENT_END_MONTH = "#workedTillMonthFor"
+EMPLOYMENT_END_YEAR = "#workedTillYearFor"
+EMPLOYMENT_SAVE = ["#submitEmployment", "button.btn-dark-ot:visible"]
+
+# The dropdown a date field opens. Options are plain list items.
+EMPLOYMENT_DD_OPTIONS = "ul.dropdown-content li, .Sdrop li, .dropdownList li"

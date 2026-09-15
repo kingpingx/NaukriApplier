@@ -1,0 +1,202 @@
+description: .NET full stack - C# / ASP.NET Core back end with an Angular front end
+
+# Job TITLES as Naukri words them. The Indian market advertises this stack under
+# both spellings of the platform, and a search for one does not return the
+# other, so both are here on purpose.
+searches:
+  - Dot Net Developer
+  - .NET Developer
+  - Full Stack Developer
+  - ASP.NET Core Developer
+  - C# Developer
+  - Angular Developer
+  - Software Developer
+
+# The "is this even my field" gate. A posting must mention at least one of
+# these. The platform terms carry it; the generic ones are here because a great
+# many .NET postings in India are titled "Software Engineer" and name the stack
+# only in the body.
+must_have_any:
+  # "dotnet", never bare "net". Every spelling of the platform folds to
+  # "dotnet" via the synonyms below, so nothing is lost - and bare "net"
+  # matched the word in ordinary prose ("net revenue", "net promoter"), which
+  # let an Event Manager and an L&D Lead through the gate on a board whose
+  # descriptions run to full job posts.
+  - dotnet
+  - asp net
+  - c#
+  - csharp
+  - full stack
+  - fullstack
+  - angular
+  - software engineer
+  - software developer
+  - application developer
+
+exclude_title_keywords:
+  - intern
+  - fresher
+  - trainee
+  - sales
+  - support engineer
+  - network engineer
+  - wordpress
+  - sharepoint
+  - vb6
+  - classic asp
+
+# ".NET" is written five ways and searched for as all five. Folding them means a
+# posting that says "Dotnet" still scores against a resume that says ".NET Core".
+synonyms:
+  ".net": dotnet
+  dot net: dotnet
+  "net core": dotnet
+  "dotnet core": dotnet
+  "asp.net": asp net
+  aspnet: asp net
+  "entity framework": ef core
+  "entity framework core": ef core
+  "ef core": ef core
+  csharp: c#
+  "c sharp": c#
+  angularjs: angular
+  "full-stack": full stack
+  fullstack: full stack
+  ts: typescript
+  "web api": rest
+  restful: rest
+  "sql server": mssql
+  mssql: mssql
+  postgres: postgresql
+  signalr: signalr
+
+vocabulary:
+  - C#
+  - .NET
+  - .NET Core
+  - .NET 6
+  - .NET 8
+  - ASP.NET
+  - ASP.NET Core
+  - ASP.NET MVC
+  - Web API
+  - Entity Framework
+  - Entity Framework Core
+  - EF Core
+  - LINQ
+  - Dapper
+  - SignalR
+  - Blazor
+  - WPF
+  - WinForms
+  - Xamarin
+  - MAUI
+  - Angular
+  - TypeScript
+  - JavaScript
+  - RxJS
+  - NgRx
+  - Ionic
+  - HTML
+  - CSS
+  - SASS
+  - Bootstrap
+  - Tailwind
+  - React
+  - Flutter
+  - Dart
+  - REST
+  - GraphQL
+  - gRPC
+  - Microservices
+  - Modular Monolith
+  - Clean Architecture
+  - Domain Driven Design
+  - CQRS
+  - MediatR
+  - Repository Pattern
+  - Dependency Injection
+  - SOLID
+  - OOP
+  - Design Patterns
+  - Multi-Tenancy
+  - RBAC
+  - JWT
+  - OAuth
+  - Identity Server
+  - Authentication
+  - SQL Server
+  - T-SQL
+  - PostgreSQL
+  - MySQL
+  - SQLite
+  - MongoDB
+  - Redis
+  - Stored Procedures
+  - Query Optimization
+  - RabbitMQ
+  - Kafka
+  - Azure Service Bus
+  - Event Driven
+  - Hangfire
+  - Quartz
+  - Docker
+  - Kubernetes
+  - Azure
+  - Azure DevOps
+  - AWS
+  - IIS
+  - CI/CD
+  - Jenkins
+  - GitHub Actions
+  - Git
+  - NuGet
+  - xUnit
+  - NUnit
+  - MSTest
+  - Moq
+  - Postman
+  - Swagger
+  - Grafana
+  - Prometheus
+  - Serilog
+  - Visual Studio
+  - Agile
+  - Scrum
+  - System Design
+  # From the resume (data/resume.json).
+  - "SQL"
+  - ".NET Framework"
+  - "REST Web APIs"
+  - "Event-Driven"
+  - "TimescaleDB"
+  - "pgvector"
+  - "Milvus"
+  - "MassTransit"
+  - "MQTT"
+  - "WebSockets"
+  - "WebRTC"
+  - "TCP/IP"
+  - "EC2"
+  - "S3"
+  - "ECS"
+  - "RDS"
+  - "CloudFront"
+  - "IAM"
+  - "Linux"
+  - "Kendo UI"
+  - "GridStack"
+  - "Architecture Tests"
+  - "ONNX Runtime"
+  - "Avalonia"
+  - "FFmpeg"
+
+seniority_terms:
+  - lead
+  - senior
+  - sr
+  - principal
+  - staff
+  - architect
+  - manager
+  - head

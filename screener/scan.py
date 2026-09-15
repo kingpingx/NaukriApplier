@@ -35,6 +35,19 @@ def run(config: dict, *, refresh: bool = False, limit: int | None = None) -> dic
     log.info("Collecting listings via %s", source.name)
     jobs = source.gather(config)
 
+    # Supplementary boards are additive, not alternatives: `source:` decides how
+    # the main board is reached, and this bolts another one alongside it. A
+    # failure here must not lose the Naukri results already in hand, so it is
+    # logged and the run continues.
+    if config.get("include_himalayas"):
+        try:
+            from .sources.himalayas import HimalayasSource
+            extra = HimalayasSource().gather(config)
+            log.info("Adding %d listing(s) from himalayas", len(extra))
+            jobs = list(jobs) + extra
+        except Exception as exc:
+            log.warning("himalayas skipped: %s", exc)
+
     if not jobs:
         return {
             "at": datetime.now().isoformat(timespec="seconds"),

@@ -37,6 +37,7 @@ DEFAULTS = {
     # --- what to search --------------------------------------------------
     "searches": [],
     "preferred_locations": [],
+    "allowed_locations": [],       # hard geography filter; empty = anywhere
     "must_have_any": [],
     "exclude_title_keywords": [],
     "exclude_companies": [],
@@ -54,6 +55,8 @@ DEFAULTS = {
     # --- where jobs come from --------------------------------------------
     "source": "local",             # local | apify
     "include_linkedin": False,
+    "include_himalayas": False,    # add worldwide-remote listings to the run
+    "himalayas": {},               # pages: how deep to page the feed
     "apify": {},                   # token, actor, proxy - see docs/apify.md
 
     # --- scoring ---------------------------------------------------------
@@ -176,6 +179,48 @@ def scaffold_pack(role: str, facts: dict | None = None,
     return path
 
 
+def _fold(text: str) -> str:
+    """Lowercase, and collapse every separator so spelling variants compare equal.
+
+    "Full-Stack", "Full Stack" and "fullstack" all fold to "full stack" once the
+    separators go, which is the only way a substring test can treat them as the
+    one title they are.
+    """
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def _fold_squashed(text: str) -> str:
+    """`_fold`, with the spaces removed too - catches "fullstack" written solid."""
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+
+def _token_match(term: str, folded_text: str) -> bool:
+    """Whole-token containment in a folded string.
+
+    Plain `in` is not safe here. Folding drops the punctuation that carries the
+    meaning of a short term - "c#" folds to "c" - and a bare substring test then
+    finds it inside "accountant" and matches a .NET pack to an accounting CV.
+    Comparing on token boundaries stops that, and a term that folds to almost
+    nothing is declined outright; `_mentions` still scores it against the body,
+    where the punctuation survives.
+    """
+    folded = _fold(term)
+    if len(folded) < 2:
+        return False
+    return f" {folded} " in f" {folded_text} "
+
+
+def _mentions(term: str, text: str) -> bool:
+    """Whether `text` names `term` as a word, not as part of a longer one.
+
+    The lookarounds admit "+" and "#" so "c++" and "c#" survive, and stop "net"
+    from matching every "network" in a resume.
+    """
+    if not term:
+        return False
+    return re.search(rf"(?<![\w+#]){re.escape(term)}(?![\w+#])", text) is not None
+
+
 def detect_role(facts: dict, directory: Path = PROFILES_DIR) -> tuple[str | None, dict]:
     """Guess which role pack fits a resume. Returns (role, scores).
 
@@ -195,7 +240,11 @@ def detect_role(facts: dict, directory: Path = PROFILES_DIR) -> tuple[str | None
     vocabulary would win every time.
     """
     haystack_skills = {str(s).lower() for s in (facts.get("skills") or [])}
-    titles_text = " ".join(str(t).lower() for t in (facts.get("titles") or []))
+    # Hyphens and spacing are a coin toss in a job title - "Full-Stack",
+    # "Full Stack" and "Fullstack" are one title written three ways, and a
+    # substring test against the raw text agrees with only one of them. Folding
+    # the separators away is what lets the title tiebreak below fire at all.
+    titles_text = _fold(" ".join(str(t) for t in (facts.get("titles") or [])))
     body = (facts.get("text") or "").lower()
 
     scores: dict[str, float] = {}
@@ -215,19 +264,20 @@ def detect_role(facts: dict, directory: Path = PROFILES_DIR) -> tuple[str | None
         # mention is weaker evidence than a skills-section entry.
         vocab_text_hits = sum(
             1 for term in vocabulary
-            if term not in haystack_skills
-            and re.search(rf"(?<![\w+#]){re.escape(term)}(?![\w+#])", body))
+            if term not in haystack_skills and _mentions(term, body))
 
-        title_hits = sum(1 for term in gate if term in titles_text)
-        gate_hits = sum(1 for term in gate if term in body)
+        title_hits = sum(1 for term in gate if _token_match(term, titles_text))
+        gate_hits = sum(1 for term in gate if _mentions(term, body))
 
         # `must_have_any` is a deliberately broad filter - "full stack" belongs
         # in the frontend AND backend gates, because a full stack posting suits
         # either. That breadth is right for filtering and useless for telling
         # packs apart, so identity is matched against the pack's job titles,
         # which are specific by construction.
-        pack_titles = [str(s).lower() for s in (pack.get("searches") or [])]
-        if any(t in titles_text for t in pack_titles):
+        pack_titles = [str(s) for s in (pack.get("searches") or [])]
+        squashed = _fold_squashed(titles_text)
+        if any(_fold(t) in titles_text or _fold_squashed(t) in squashed
+               for t in pack_titles):
             named_in_title.add(role)
 
         if not vocabulary or not gate:
@@ -504,7 +554,10 @@ def _title_noun(titles: list[str]) -> str:
 
 def _clean_title(title: str) -> str | None:
     """A job title reduced to something worth searching for."""
-    cleaned = re.sub(r"\s*[|(\-–,].*$", "", title).strip()
+    # A dash only ends the title when it is spaced like a separator. Cutting at
+    # any hyphen turned "Full-Stack Developer" into "Full", which is not a
+    # search - and hyphenated titles are common enough to matter.
+    cleaned = re.split(r"\s*[|(,]|\s+[-–—]\s+|\s*[–—]", title)[0].strip()
     cleaned = re.sub(r"^(sr\.?|senior|jr\.?|junior|lead|principal|staff)\s+",
                      "", cleaned, flags=re.IGNORECASE).strip()
     cleaned = re.sub(r"\s+(i{1,3}|iv|v|\d)$", "", cleaned, flags=re.IGNORECASE).strip()

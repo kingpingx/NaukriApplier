@@ -39,13 +39,23 @@ SKILL_HEADINGS = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
-# A heading that ends the skills section.
+# A heading that ends the skills section. The optional first group covers the
+# qualifiers resumes put in front of one - "PROFESSIONAL EXPERIENCE" and
+# "RELEVANT PROJECTS" are the same heading as "EXPERIENCE" and "PROJECTS", and
+# without them the skills section ran on into the job bullets below it.
 SECTION_BREAK = re.compile(
-    r"^\s*(work\s+)?(experience|employment|education|projects?|certificat|"
+    r"^\s*(?:(?:work|professional|relevant|industry|career|employment|academic|"
+    r"personal|key|selected)\s+)?"
+    r"(experience|employment|education|projects?|certificat|"
     r"achievements?|summary|profile|objective|awards?|publications?|"
     r"languages?|interests?|references?|declaration)\b",
     re.IGNORECASE | re.MULTILINE,
 )
+
+# A skills section is very often laid out as categorised lines - "Languages:
+# C#, Java", "Tools: Docker, Git". The label before the colon is a sub-heading
+# inside the section, not a skill, and not the end of the section either.
+SKILL_SUBLABEL = re.compile(r"^\s*[A-Za-z][A-Za-z0-9 &/,'+.-]{0,44}:\s*")
 
 # Splits a skills block into individual skills. Resumes use every one of these.
 SKILL_SPLIT = re.compile(r"[,;|•▪·‣⁃\n\t]+|\s{3,}|(?<=\w)\s+/\s+(?=\w)")
@@ -200,6 +210,42 @@ def _clean_skill(raw: str) -> str | None:
     return skill
 
 
+def _section_stop(block: str) -> int | None:
+    """Where the skills section ends, ignoring its own sub-headings.
+
+    `SECTION_BREAK` is deliberately broad, and two of its words - "languages"
+    and "projects" - are also how resumes label a *row* of a skills table:
+
+        TECHNICAL SKILLS
+        Languages: C#, Java, TypeScript          <- not the end of anything
+
+    Taking the first match there truncated the section to nothing and the whole
+    resume parsed with zero skills. A real heading stands alone on its line; a
+    sub-label carries its list on the same line after a colon. That is the
+    distinction, and it is the one the layout already makes visually.
+    """
+    for match in SECTION_BREAK.finditer(block):
+        line_start = block.rfind("\n", 0, match.start()) + 1
+        line_end = block.find("\n", match.start())
+        line = block[line_start:line_end if line_end != -1 else len(block)]
+        label, colon, rest = line.partition(":")
+        if colon and rest.strip():
+            continue                                   # "Languages: C#, Java"
+        if not block[:match.start()].strip():
+            continue                                   # nothing above it to keep
+        return match.start()
+    return None
+
+
+def _strip_sublabels(block: str) -> str:
+    """Drop the "Languages:" / "Tools & Frameworks:" label from each line.
+
+    Left in, the label is split off as a skill of its own ("Languages C#"), and
+    every categorised resume grows a handful of skills nobody has.
+    """
+    return "\n".join(SKILL_SUBLABEL.sub("", line) for line in block.splitlines())
+
+
 def extract_skills(text: str, vocabulary: list[str] | None = None) -> list[str]:
     """Skills from the resume's own skills section, plus any known vocabulary hit.
 
@@ -220,13 +266,17 @@ def extract_skills(text: str, vocabulary: list[str] | None = None) -> list[str]:
 
     for heading in SKILL_HEADINGS.finditer(text):
         block = text[heading.end():]
-        stop = SECTION_BREAK.search(block)
-        if stop:
-            block = block[:stop.start()]
+        stop = _section_stop(block)
+        if stop is not None:
+            block = block[:stop]
         # A skills section runs to the next heading, but an unheaded resume can
         # run to the end of the file - cap it so one missing heading does not
         # swallow the entire document into the skills list.
         block = block[:2000]
+        # Parentheticals go before the split, not after: "Milvus (vector /
+        # similarity search)" otherwise splits on the slash inside them and
+        # leaves two half-skills behind.
+        block = re.sub(r"\([^)]*\)?", " ", _strip_sublabels(block))
         for piece in SKILL_SPLIT.split(block):
             add(_clean_skill(piece))
 
@@ -322,38 +372,114 @@ def extract_skill_years(text: str) -> dict[str, float]:
     return out
 
 
+ROLE_WORDS = re.compile(
+    r"\b(engineer|developer|analyst|lead|manager|architect|consultant|"
+    r"specialist|administrator|designer|scientist|tester|qa|sdet|intern|"
+    r"associate|executive|officer|head|director|principal|staff|senior|"
+    r"junior|sr|jr)\b", re.IGNORECASE)
+
+# What is left of a date once the range itself is removed, plus the open-ended
+# end markers that never appear as part of one.
+DATE_REMAINS = re.compile(
+    r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*,?\s*'?\d{2,4}\b"
+    r"|\b(?:present|current|ongoing|till\s*date)\b|\b(19|20)\d{2}\b", re.IGNORECASE)
+
+# One line carrying company, title and dates together is the common layout, not
+# the exception - "I2V Systems Pvt. Ltd. - Software Developer  Dec 2023 - Present".
+# These are the separators such a line uses between the three.
+TITLE_SEPARATOR = re.compile(r"\s*[—–|·•]\s*|\s+-\s+|\s*,\s*|\s+@\s+|\s+at\s+", re.IGNORECASE)
+
+
+def _title_from_line(line: str) -> str | None:
+    """The job title alone, out of a line that may also carry a company and dates.
+
+    Returning the whole line instead put "I2V Systems Pvt. Ltd. - Software
+    Developer Dec 2023" into the search terms, where it is too long to survive
+    cleaning and too specific to match a posting even if it did.
+    """
+    stripped = DATE_REMAINS.sub(" ", DATE_RANGE.sub(" ", line))
+    stripped = re.sub(r"\s{2,}", " ", stripped).strip(" \t-–—•|,")
+    for segment in TITLE_SEPARATOR.split(stripped):
+        segment = segment.strip(" \t-–—•|.")
+        if 3 < len(segment) < 60 and ROLE_WORDS.search(segment):
+            return segment
+    return None
+
+
+def extract_headline(text: str) -> str | None:
+    """The role a resume declares for itself, under the name at the top.
+
+    "Full-Stack Software Developer" is what this person calls themselves and is
+    a better search term than whatever their last employer put on the contract.
+    """
+    for line in text[:600].splitlines()[1:6]:
+        line = line.strip(" \t-•|")
+        if not (3 < len(line) < 80) or DATE_RANGE.search(line):
+            continue
+        title = _title_from_line(line)
+        if title:
+            return title
+    return None
+
+
 def extract_titles(text: str) -> list[str]:
     """Job titles, most recent first, from the lines around each date range."""
     titles: list[str] = []
     seen: set[str] = set()
+
+    def add(title: str | None) -> None:
+        if not title:
+            return
+        key = title.lower()
+        if key not in seen:
+            seen.add(key)
+            titles.append(title)
+
     for match in DATE_RANGE.finditer(text):
         window = text[max(0, match.start() - 200):match.start() + 120]
         for line in window.splitlines():
             line = line.strip(" \t-•|")
-            if not (3 < len(line) < 70):
+            if not (3 < len(line) < 90):
                 continue
-            if DATE_RANGE.search(line) and len(line) < 30:
+            if not ROLE_WORDS.search(line):
                 continue
-            if not re.search(
-                r"\b(engineer|developer|analyst|lead|manager|architect|consultant|"
-                r"specialist|administrator|designer|scientist|tester|qa|sdet|intern|"
-                r"associate|executive|officer|head|director|principal|staff|senior|"
-                r"junior|sr|jr)\b", line, re.IGNORECASE):
-                continue
-            cleaned = re.sub(r"\s{2,}", " ", line)
-            key = cleaned.lower()
-            if key not in seen:
-                seen.add(key)
-                titles.append(cleaned)
+            add(_title_from_line(line))
+
+    # Last, not first: a held job outranks a self-description, but a resume with
+    # its dates laid out in a table the parser cannot read still has this.
+    add(extract_headline(text))
     return titles[:8]
 
 
 def extract_location(text: str) -> str | None:
+    """The city to search in.
+
+    The header is the trustworthy source - it is where an address goes. Plenty
+    of resumes put no address there at all, though, and those used to fall all
+    the way through to "Remote only", which quietly halves what a scan returns.
+    So a second pass reads the rest of the document, where a university or a
+    previous employer usually names the city, and takes the most-mentioned one.
+    That is a guess, and it says so in the log; `preferred_locations` in
+    config.yaml overrides it.
+    """
     header = text[:900]
     for city in CITIES:
         if re.search(rf"\b{re.escape(city)}\b", header, re.IGNORECASE):
             return city
-    return None
+
+    counts: list[tuple[int, int, str]] = []
+    for index, city in enumerate(CITIES):
+        if city in ("Remote", "Hybrid", "Work From Home"):
+            continue        # a mention in a bullet is not where someone lives
+        hits = len(re.findall(rf"\b{re.escape(city)}\b", text, re.IGNORECASE))
+        if hits:
+            counts.append((hits, -index, city))
+    if not counts:
+        return None
+    city = max(counts)[2]
+    log.info("No address in the resume header - inferred %s from the body. "
+             "Set `preferred_locations:` in config.yaml if that is wrong.", city)
+    return city
 
 
 def extract_contact(text: str) -> dict:

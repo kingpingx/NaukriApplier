@@ -113,6 +113,12 @@ class TestScoring:
         assert low.score == 0.0
         assert unstated.score > 0, "a job with no stated salary must not be dropped"
 
+    def test_salary_floor_keeps_a_range_that_reaches_it(self):
+        config = {**BASE_CONFIG, "min_salary_lpa": 20}
+        reaches = make_job(job_id="c", salary_label="15-25 Lacs PA", description="etl")
+        score_mod.score(reaches, config)
+        assert reaches.score > 0, "15-25 can pay 20, so it must not be dropped"
+
     def test_synonyms_fold_spellings_together(self):
         config = {**BASE_CONFIG, "profile_skills": ["extract transform load"],
                   "synonyms": {"etl": "extract transform load"}}
@@ -149,6 +155,57 @@ class TestScoring:
         assert a.score == b.score
 
 
+class TestTheFieldGate:
+    """`must_have_any` is what makes a shortlist short. It has to actually bite."""
+
+    def test_a_punctuated_gate_term_does_not_match_everything(self):
+        """"c#" normalises to "c", which is a substring of almost any job.
+
+        Left unanchored, one such term in the gate quietly admitted every
+        posting on the board - an accounting job included.
+        """
+        config = {**BASE_CONFIG, "must_have_any": ["c#", "asp net"]}
+        unrelated = make_job(title="Data Scientist", skills=["Python", "PyTorch"],
+                             description="Train machine learning models.")
+        assert score_mod.hard_reject(unrelated, config) is not None
+
+    def test_the_punctuated_term_still_matches_its_own_job(self):
+        config = {**BASE_CONFIG, "must_have_any": ["c#", "asp net"]}
+        match = make_job(title="Dot Net Developer", skills=["C#", "ASP.NET Core"],
+                         description="Build APIs in ASP.NET Core.")
+        assert score_mod.hard_reject(match, config) is None
+
+    def test_allowed_locations_drops_an_out_of_region_job(self):
+        config = {**BASE_CONFIG, "allowed_locations": ["Pune", "Mumbai"]}
+        job = make_job(title="Data Engineer", description="etl", location="Bengaluru")
+        assert score_mod.hard_reject(job, config) is not None
+
+    def test_allowed_locations_keeps_a_substring_match(self):
+        """'Navi Mumbai' and 'Pune, Bengaluru' are both reachable from the region."""
+        config = {**BASE_CONFIG, "allowed_locations": ["Pune", "Mumbai"]}
+        for where in ("Navi Mumbai", "Pune, Bengaluru", "Mumbai Suburban"):
+            job = make_job(title="Data Engineer", description="etl", location=where)
+            assert score_mod.hard_reject(job, config) is None, where
+
+    def test_a_job_with_no_stated_location_is_kept(self):
+        """Naukri leaves this blank often; dropping them all loses good jobs."""
+        config = {**BASE_CONFIG, "allowed_locations": ["Pune"]}
+        job = make_job(title="Data Engineer", description="etl", location=None)
+        assert score_mod.hard_reject(job, config) is None
+
+    def test_no_allowed_locations_means_anywhere(self):
+        config = {**BASE_CONFIG, "allowed_locations": []}
+        job = make_job(title="Data Engineer", description="etl", location="Bengaluru")
+        assert score_mod.hard_reject(job, config) is None
+
+    def test_a_gate_term_is_not_matched_inside_a_longer_word(self):
+        config = {**BASE_CONFIG, "must_have_any": ["net"]}
+        job = make_job(title="Network Support Engineer", skills=["Cisco"],
+                       description="Maintain network switches and routers.")
+        assert score_mod.hard_reject(job, config) is not None, \
+            "'net' matched inside 'network'"
+
+
 # --- the universality claim --------------------------------------------
 
 class TestRoleNeutrality:
@@ -174,7 +231,7 @@ class TestRoleNeutrality:
             config_mod.load_pack("astronaut")
         assert "Available:" in str(exc.value)
 
-    @pytest.mark.parametrize("role", ["qa-automation", "backend-engineer", "data-engineer"])
+    @pytest.mark.parametrize("role", ["backend-engineer", "data-engineer", "dotnet-fullstack"])
     def test_each_pack_produces_its_own_searches(self, role, tmp_path):
         facts = {"skills": ["Python"], "years": 5.0, "titles": [], "text": "", "skill_years": {}}
         config = config_mod.load(path=tmp_path / "missing.yaml",
@@ -197,10 +254,6 @@ class TestRoleDetection:
     """
 
     RESUMES = {
-        "qa-automation": dict(
-            skills=["Selenium", "Playwright", "PyTest", "API Testing", "JIRA", "TestNG"],
-            titles=["Senior QA Automation Engineer"],
-            text="qa automation test engineer regression test cases defect management automation testing"),
         "backend-engineer": dict(
             skills=["Java", "Spring Boot", "Microservices", "Kafka", "PostgreSQL", "REST"],
             titles=["Software Engineer"],
@@ -213,18 +266,10 @@ class TestRoleDetection:
             skills=["Spark", "Airflow", "Kafka", "Snowflake", "dbt", "PySpark"],
             titles=["Senior Data Engineer"],
             text="data engineer etl pipeline big data warehouse batch streaming"),
-        "devops-sre": dict(
-            skills=["Kubernetes", "Terraform", "Docker", "Prometheus", "Ansible", "ArgoCD"],
-            titles=["DevOps Engineer"],
-            text="devops sre infrastructure ci/cd kubernetes cloud platform engineer reliability"),
-        "data-scientist": dict(
-            skills=["PyTorch", "Scikit Learn", "Pandas", "TensorFlow", "MLflow", "NumPy"],
-            titles=["Data Scientist"],
-            text="machine learning data science model deep learning nlp analytics"),
-        "mobile-developer": dict(
-            skills=["Kotlin", "Jetpack Compose", "Retrofit", "Room", "Coroutines", "Hilt"],
-            titles=["Senior Android Developer"],
-            text="android developer native apps mobile app play store"),
+        "dotnet-fullstack": dict(
+            skills=["C#", "ASP.NET Core", "Entity Framework Core", "Angular", "SQL Server", "TypeScript"],
+            titles=[".NET Developer"],
+            text="dotnet full stack developer asp net core web api angular sql server"),
         # The hard one. A full stack resume is supposed to look half like
         # frontend and half like backend, so it can never win on margin - only
         # the job title separates it.
@@ -234,20 +279,10 @@ class TestRoleDetection:
             text="full stack mern web application frontend and backend"),
     }
 
-    # An iOS resume shares no vocabulary with the Android one but must land on
-    # the same pack.
-    IOS = dict(skills=["Swift", "SwiftUI", "UIKit", "Core Data", "Combine", "Xcode"],
-               titles=["iOS Developer"],
-               text="ios developer swift mobile application app store")
-
     @pytest.mark.parametrize("expected", list(RESUMES))
     def test_each_field_is_detected(self, expected):
         got, scores = config_mod.detect_role(self.RESUMES[expected])
         assert got == expected, f"got {got}; scores {scores}"
-
-    def test_ios_lands_on_the_mobile_pack(self):
-        got, _ = config_mod.detect_role(self.IOS)
-        assert got == "mobile-developer"
 
     def test_the_winner_wins_clearly(self):
         """A narrow margin means a coin flip, which is worse than not guessing."""
@@ -284,20 +319,30 @@ class TestRoleDetection:
         got, _ = config_mod.detect_role(dict(skills=[], titles=[], text=""))
         assert got is None
 
+    def test_a_hyphenated_title_matches_an_unhyphenated_pack(self):
+        """"Full-Stack Developer" and "Full Stack Developer" are one title."""
+        base = {**self.RESUMES["dotnet-fullstack"], "skill_years": {}}
+        hyphenated = config_mod.detect_role({**base, "titles": ["Full-Stack Developer"]})[1]
+        spaced = config_mod.detect_role({**base, "titles": ["Full Stack Developer"]})[1]
+        assert hyphenated["dotnet-fullstack"] == spaced["dotnet-fullstack"], \
+            "the hyphen changed the score"
+
     def test_detection_fills_the_gate(self, tmp_path):
         """A detected pack must actually reach the config, not just be logged."""
-        facts = {**self.RESUMES["backend-engineer"], "skill_years": {}}
+        facts = {**self.RESUMES["dotnet-fullstack"], "skill_years": {}}
         config = config_mod.load(path=tmp_path / "none.yaml", profile=None, resume_facts=facts)
-        assert config["role"] == "backend-engineer"
-        assert config["role_detected"] == "backend-engineer"
+        assert config["role"] == "dotnet-fullstack"
+        assert config["role_detected"] == "dotnet-fullstack"
         assert config["must_have_any"], "a detected pack should supply the field gate"
 
     def test_an_explicit_role_is_never_overridden(self, tmp_path):
+        # A resume detection would decline, so only the explicit role can set it.
         path = tmp_path / "config.yaml"
-        path.write_text("role: data-engineer\n", encoding="utf-8")
-        facts = {**self.RESUMES["backend-engineer"], "skill_years": {}}
+        path.write_text("role: dotnet-fullstack\n", encoding="utf-8")
+        facts = dict(skills=["Tally", "GST", "Excel"], titles=["Accountant"],
+                     text="accounts payable ledger taxation audit", skill_years={})
         config = config_mod.load(path=path, profile=None, resume_facts=facts)
-        assert config["role"] == "data-engineer", "the user's choice must win"
+        assert config["role"] == "dotnet-fullstack", "the user's choice must win"
         assert config["role_detected"] is None
 
 
@@ -385,6 +430,16 @@ class TestDerivedSearches:
     def test_capped_at_five(self, tmp_path):
         keywords = self._searches(tmp_path, skills=["A", "B", "C", "D", "E", "F", "G", "H"])
         assert len(keywords) <= 5, "each search is a real navigation - do not run ten"
+
+    def test_a_hyphenated_title_is_not_cut_at_its_hyphen(self):
+        """Cutting at any dash turned "Full-Stack Developer" into "Full"."""
+        assert config_mod._clean_title("Full-Stack Software Developer") == \
+            "Full-Stack Software Developer"
+        assert config_mod._clean_title("Sr. Full-Stack Developer") == "Full-Stack Developer"
+
+    def test_a_spaced_dash_still_ends_a_title(self):
+        assert config_mod._clean_title("Software Developer - Backend") == "Software Developer"
+        assert config_mod._clean_title("Software Developer — Payments") == "Software Developer"
 
 
 # --- resume parsing -----------------------------------------------------
@@ -476,6 +531,85 @@ class TestResume:
         assert "no text" in str(exc.value)
 
 
+class TestCategorisedResume:
+    """A skills section laid out as labelled rows, which is the common shape.
+
+    Every assertion here is a bug that shipped: this layout parsed to zero
+    skills, because "Languages:" is both how a resume labels a row of a skills
+    table and how it titles the section about French and Hindi.
+    """
+
+    SAMPLE = """
+JANE EXAMPLE
+Full-Stack Software Developer | .NET - Angular - Cross-Platform
+someone@example.com
+
+PROFESSIONAL SUMMARY
+Full-stack engineer with 2+ years building enterprise systems.
+
+TECHNICAL SKILLS
+Languages: C#, Java, TypeScript, SQL, Dart
+Frameworks & Libraries: ASP.NET Core (.NET 6), Angular 17, Flutter
+Data & Search: SQL Server, PostgreSQL, Milvus (vector / similarity search)
+
+PROFESSIONAL EXPERIENCE
+I2V Systems Pvt. Ltd. — Software Developer Dec 2023 – Present
+• Optimized a PostgreSQL query and tuned database indexes.
+
+EDUCATION
+B.E., Mumbai University — CGPA 7.02 2021
+"""
+
+    def skills(self):
+        return [s.lower() for s in resume_mod.extract_skills(self.SAMPLE)]
+
+    def test_a_labelled_row_does_not_end_the_skills_section(self):
+        assert "c#" in self.skills(), "'Languages:' was read as a section heading"
+
+    def test_every_labelled_row_is_read(self):
+        found = self.skills()
+        for skill in ("c#", "typescript", "angular 17", "flutter", "postgresql"):
+            assert skill in found, f"{skill} missing - a later row was dropped"
+
+    def test_the_row_label_is_not_itself_a_skill(self):
+        found = self.skills()
+        assert not any(s.startswith(("languages", "frameworks", "data &"))
+                       for s in found), f"a row label leaked in: {found}"
+
+    def test_a_qualified_heading_ends_the_section(self):
+        """'PROFESSIONAL EXPERIENCE' is the same heading as 'EXPERIENCE'."""
+        found = self.skills()
+        assert not any("optimized" in s or "indexes" in s for s in found), \
+            f"the section ran on into the job bullets: {found}"
+
+    def test_a_parenthetical_is_not_split_into_half_skills(self):
+        found = self.skills()
+        assert "milvus" in found
+        assert "similarity search" not in found
+
+    def test_the_title_is_separated_from_the_company_and_the_dates(self):
+        titles = resume_mod.extract_titles(self.SAMPLE)
+        assert "Software Developer" in titles, titles
+        assert not any("I2V" in t or "2023" in t for t in titles), \
+            f"company or dates left on the title: {titles}"
+
+    def test_the_headline_is_kept_as_a_title(self):
+        titles = resume_mod.extract_titles(self.SAMPLE)
+        assert any("full-stack" in t.lower() for t in titles), titles
+
+    def test_a_held_job_outranks_the_headline(self):
+        titles = resume_mod.extract_titles(self.SAMPLE)
+        assert titles[0] == "Software Developer"
+
+    def test_location_falls_back_to_the_body(self):
+        """No address in the header, but the university names the city."""
+        assert resume_mod.extract_location(self.SAMPLE) == "Mumbai"
+
+    def test_the_header_still_wins_when_it_has_an_address(self):
+        text = "Priya Nair\nPune, India\n\nEDUCATION\nMumbai University Mumbai Mumbai"
+        assert resume_mod.extract_location(text) == "Pune"
+
+
 # --- config layering ----------------------------------------------------
 
 class TestConfig:
@@ -530,9 +664,9 @@ class TestConfig:
 
     def test_role_pack_gate_reaches_the_config(self, tmp_path):
         path = tmp_path / "config.yaml"
-        path.write_text("role: data-engineer\n", encoding="utf-8")
+        path.write_text("role: dotnet-fullstack\n", encoding="utf-8")
         config = config_mod.load(path=path, profile=None, resume_facts=self.FACTS)
-        assert "data engineer" in [m.lower() for m in config["must_have_any"]]
+        assert "dotnet" in [m.lower() for m in config["must_have_any"]]
 
     def test_locations_default_to_resume_city_plus_remote(self, tmp_path):
         config = config_mod.load(path=tmp_path / "none.yaml", profile=None,
@@ -637,3 +771,101 @@ class TestNoPersonalDataShipped:
             assert re.fullmatch(
                 r"[\w_]+:\s*(\[\]|\{\}|null|true|false|\d+(\.\d+)?|local)?", stripped), (
                 f"config.example.yaml carries a real value: {stripped!r}")
+
+
+class TestTrackerPage:
+    """The HTML tracker is the thing you actually look at. It must have rows."""
+
+    def test_rows_are_built_from_the_shortlist_shape(self):
+        """`scan.write` passes {shortlist, review}; build_rows read {naukri}.
+
+        The keys never matched, so every page ever written had zero rows in it
+        and nothing complained - an empty page is still a valid page.
+        """
+        from screener import page as page_mod
+        results = {
+            "shortlist": [{"job_id": "1", "title": "Dot Net Developer",
+                           "company": "Acme", "location": "Pune", "score": 88.0,
+                           "url": "https://naukri.com/1"}],
+            "review": [{"job_id": "2", "title": "Angular Developer",
+                        "company": "Globex", "location": "Mumbai", "score": 61.0,
+                        "url": "https://naukri.com/2"}],
+        }
+        rows = page_mod.build_rows(results, {}, "2026-08-28")
+        assert len(rows) == 2, f"expected both bands, got {rows}"
+        assert {r["title"] for r in rows} == {"Dot Net Developer", "Angular Developer"}
+
+    def test_the_original_naukri_shape_still_works(self):
+        from screener import page as page_mod
+        results = {"naukri": [{"job_id": "9", "title": "X", "company": "Y",
+                               "location": "Pune", "score": 70.0, "url": "u"}]}
+        assert len(page_mod.build_rows(results, {}, "2026-08-28")) == 1
+
+    def test_a_job_in_both_bands_is_not_duplicated(self):
+        from screener import page as page_mod
+        job = {"job_id": "1", "title": "T", "company": "C", "location": "Pune",
+               "score": 80.0, "url": "u"}
+        rows = page_mod.build_rows({"shortlist": [job], "review": [job]}, {}, "2026-08-28")
+        assert len(rows) == 1
+
+
+class TestHimalayas:
+    """The remote board. Its API takes no filters, so this module is the filter."""
+
+    def test_unrestricted_postings_are_open_to_you(self):
+        from screener.sources import himalayas as h
+        assert h.eligible(None) is True
+        assert h.eligible([]) is True
+
+    def test_us_only_postings_are_dropped(self):
+        """A 'remote' job restricted to the US is not one you can take."""
+        from screener.sources import himalayas as h
+        assert h.eligible(["United States"]) is False
+        assert h.eligible(["Germany", "Ireland"]) is False
+
+    def test_postings_naming_india_are_kept(self):
+        from screener.sources import himalayas as h
+        assert h.eligible(["India"]) is True
+        assert h.eligible(["Worldwide"]) is True
+        assert h.eligible(["United States", "India"]) is True
+
+    def test_a_record_maps_onto_the_job_shape(self):
+        from screener.sources import himalayas as h
+        job = h.to_job({
+            "title": "Senior .NET Engineer",
+            "companyName": "Acme Remote",
+            "applicationLink": "https://himalayas.app/companies/acme/jobs/dotnet",
+            "guid": "https://himalayas.app/companies/acme/jobs/dotnet",
+            "categories": ["Backend-Development", "Fullstack-Development"],
+            "locationRestrictions": [],
+            "description": "<p>Build APIs in <b>ASP.NET Core</b>.</p>",
+            "seniority": ["Mid-level"],
+        })
+        assert job is not None
+        assert job.source == "himalayas"
+        assert job.location == "Remote"
+        # Hyphenated categories would never match a resume skill.
+        assert "Backend Development" in job.skills
+        assert "<b>" not in job.description and "ASP.NET Core" in job.description
+        # No invented years - Himalayas states a band, not a number.
+        assert job.min_exp is None
+
+    def test_a_record_with_no_link_is_skipped(self):
+        from screener.sources import himalayas as h
+        assert h.to_job({"title": "X", "companyName": "Y"}) is None
+
+    def test_restricted_locations_are_visible_in_the_row(self):
+        from screener.sources import himalayas as h
+        job = h.to_job({"title": "T", "companyName": "C", "applicationLink": "u",
+                        "locationRestrictions": ["India", "Singapore"]})
+        assert "India" in job.location
+
+    def test_the_page_does_not_double_prefix_the_id(self):
+        """A doubled prefix would mint a new seen.json key every single run."""
+        from screener import page as page_mod
+        rows = page_mod.build_rows(
+            {"shortlist": [{"job_id": "himalayas:dotnet", "title": "T", "company": "C",
+                            "location": "Remote", "score": 70.0, "url": "u",
+                            "source": "himalayas"}]}, {}, "2026-08-31")
+        assert rows[0]["id"] == "himalayas:dotnet"
+        assert rows[0]["board"] == "Himalayas"

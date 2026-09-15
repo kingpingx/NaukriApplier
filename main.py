@@ -5,6 +5,7 @@
     python main.py --resume my_cv.pdf   parse your resume into facts
     python main.py --login              sign in to Naukri once, save the session
     python main.py --extract            read your live Naukri profile (optional)
+    python main.py --upload-resume      replace the resume on your Naukri profile
     python main.py --scan               search, score, rank, write the results
     python main.py --check              show the config without touching a browser
     python main.py --roles              list role packs, and which fits your resume
@@ -21,7 +22,7 @@ import sys
 from pathlib import Path
 
 from screener import config as config_mod
-from screener import paths, resume as resume_mod, scan as scan_mod
+from screener import paths, resume as resume_mod, scan as scan_mod, upload as upload_mod
 
 EXAMPLE_CONFIG = paths.ROOT / "config.example.yaml"
 
@@ -173,6 +174,35 @@ def cmd_resume(path_arg: str | None) -> int:
     return 0
 
 
+def cmd_upload_resume(path_arg, as_name: str | None, dry_run: bool) -> int:
+    """Replace the resume on the live Naukri profile."""
+    paths.ensure()
+    source = Path(path_arg) if path_arg is not True else resume_mod.find_resume()
+    if source is None:
+        print(f"\n  No resume found in {paths.RESUME_DIR}."
+              f"\n  Pass one:  python main.py --upload-resume path/to/cv.pdf\n")
+        return 2
+
+    staged = upload_mod.staged_copy(source, as_name)
+    upload_mod.check(staged)
+    size_kb = staged.stat().st_size / 1024
+
+    if dry_run:
+        live = upload_mod.current()
+        print(f"""
+  Would upload:  {staged}  ({size_kb:.0f} KB)
+  Replacing:     {live.get('name')}  ({live.get('uploaded_on')})
+
+  Nothing was changed. Drop --dry-run to do it.
+""")
+        return 0
+
+    print(f"\n  Uploading {staged.name} ({size_kb:.0f} KB) to your Naukri profile...")
+    result = upload_mod.upload(staged)
+    print(upload_mod.summarise(result))
+    return 0
+
+
 def _role_from_config() -> str | None:
     """Read just `role:` out of config.yaml, tolerating an otherwise broken file."""
     if not paths.CONFIG_PATH.exists():
@@ -227,6 +257,13 @@ def main() -> int:
                         help="Parse a resume into data/resume.json")
     action.add_argument("--login", action="store_true", help="Sign in to Naukri and save the session")
     action.add_argument("--extract", action="store_true", help="Read your live Naukri profile into data/")
+    action.add_argument("--upload-resume", dest="upload_resume", nargs="?", const=True,
+                        metavar="PATH",
+                        help="Replace the resume attached to your Naukri profile")
+    parser.add_argument("--as-name", dest="as_name", metavar="FILENAME",
+                        help="Upload under this filename - recruiters see it")
+    parser.add_argument("--dry-run", action="store_true", dest="dry_run",
+                        help="With --upload-resume: show what would change, upload nothing")
     action.add_argument("--check", action="store_true", help="Print the effective config and exit")
     action.add_argument("--scan", action="store_true", help="Search, score and rank today's jobs")
 
@@ -264,6 +301,9 @@ def main() -> int:
             paths.ensure()
             return 0 if session_mod.login() else 1
 
+        if args.upload_resume:
+            return cmd_upload_resume(args.upload_resume, args.as_name, args.dry_run)
+
         if args.extract:
             from screener import extract as extract_mod
             paths.ensure()
@@ -272,6 +312,9 @@ def main() -> int:
             print(extract_mod.summarise(profile))
             return 0
 
+    except upload_mod.UploadError as exc:
+        print(f"\n  {exc}\n")
+        return 2
     except resume_mod.ResumeError as exc:
         print(f"\n  {exc}\n")
         return 2

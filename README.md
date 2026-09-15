@@ -13,16 +13,16 @@ It finds jobs. It does not apply to them — see [Where the line is](#where-the-
   Shortlist:    12
   Worth a read: 23
 
-     84.3  Senior Data Engineer                          Acme Analytics
-     79.1  Data Platform Engineer (Remote)               Globex
-     76.8  Lead Data Engineer - Streaming                Initech
+     84.3  Senior .NET Developer                         Acme Analytics
+     79.1  Full Stack Developer (.NET / Angular)         Globex
+     76.8  Lead ASP.NET Core Developer                   Initech
 ```
 
 Every score comes with its breakdown, so when it ranks something you would not
 have, you can see why and fix the config instead of guessing:
 
 ```
-skills=38.2 title=22 experience=15 location=10 freshness=3 | matched: Spark, Airflow, Kafka, dbt
+skills=38.2 title=22 experience=15 location=10 freshness=3 | matched: C#, ASP.NET Core, Angular, SQL Server
 ```
 
 ## Quick start
@@ -51,16 +51,16 @@ markdown report, and the raw JSON.
 `--check` before you have touched a single setting:
 
 ```
-  Role pack:  backend-engineer  (matched to your resume - set `role:` to pin it)
+  Role pack:  dotnet-fullstack  (matched to your resume - set `role:` to pin it)
   Experience: 4 years
   Skills:     15
   Locations:  Hyderabad, Remote
-  Searches:   5
-                - Backend Developer in Hyderabad
-                - Software Engineer Backend in Hyderabad
-                - API Developer in Hyderabad
-                - Microservices Developer in Hyderabad
-                - Java Developer in Hyderabad
+  Searches:
+                - Dot Net Developer in Hyderabad
+                - .NET Developer in Hyderabad
+                - Full Stack Developer in Hyderabad
+                - ASP.NET Core Developer in Hyderabad
+                ...
 ```
 
 Your resume is matched against every role pack on three signals — your job
@@ -72,16 +72,10 @@ Same repo, same commands, a different resume:
 
 | Resume | Detected | First search |
 | --- | --- | --- |
+| C# / ASP.NET Core / Angular, Mumbai | `dotnet-fullstack` | Dot Net Developer in Mumbai |
 | Java / Spring Boot, Hyderabad | `backend-engineer` | Backend Developer in Hyderabad |
-| Kotlin / Jetpack Compose, Chennai | `mobile-developer` | Android Developer in Chennai |
-| Swift / SwiftUI, Mumbai | `mobile-developer` | iOS Developer in Mumbai |
 | React / Node / Mongo, Pune | `fullstack-developer` | Full Stack Developer in Pune |
 | Spark / Airflow / dbt, Bengaluru | `data-engineer` | Data Engineer in Bengaluru |
-| Selenium / PyTest, Pune | `qa-automation` | SDET in Pune |
-
-Nothing about this is hardcoded to one field. Detection is covered by tests that
-run every one of those resumes through it, including the cases where it should
-refuse to answer.
 
 ## How it decides
 
@@ -126,12 +120,9 @@ python main.py --roles
 ```
   backend-engineer      Backend, server-side and API engineering
   data-engineer         Data engineering, ETL pipelines and data platforms
-  data-scientist        Data science, machine learning and applied analytics
-  devops-sre            DevOps, SRE, platform and cloud infrastructure
+  dotnet-fullstack      .NET full stack - C# / ASP.NET Core back end with an Angular front end  <- matches your resume
   frontend-engineer     Frontend, UI and web application engineering
   fullstack-developer   Full stack web development, front and back of the same app
-  mobile-developer      Mobile app development - Android, iOS and cross-platform
-  qa-automation         QA, SDET, test automation and quality engineering  <- matches your resume
 ```
 
 Run it after `--resume` and it marks the one that matches you.
@@ -140,7 +131,7 @@ To pin it — worth doing once you know which you want, so a resume edit cannot
 change it under you:
 
 ```yaml
-role: data-engineer
+role: dotnet-fullstack
 ```
 
 ### Your field isn't listed
@@ -196,13 +187,13 @@ and no vocabulary to catch a skill your CV never spelled out.
 derived from your resume.
 
 ```yaml
-role: data-engineer
+role: dotnet-fullstack
 years: 7                      # only if your resume doesn't state it plainly
 
 searches:                     # leave empty to derive from your role + title
-  - keyword: Data Engineer
+  - keyword: .NET Developer
     location: Pune
-  - keyword: Analytics Engineer
+  - keyword: ASP.NET Core Developer
     location: null            # null = all of India
     pages: 2
 
@@ -240,8 +231,8 @@ It prints what it found, so check it:
   Experience: 7 years
   Location:   Bengaluru
   Skills:     15 found
-              Python, Scala, SQL, Spark, PySpark, Airflow, dbt, Kafka...
-  Titles:     Senior Data Engineer
+              C#, ASP.NET Core, Entity Framework Core, Angular, SQL Server...
+  Titles:     Senior .NET Developer
 ```
 
 Contact details are stripped before any matching happens — a phone number in a
@@ -261,6 +252,27 @@ Reads your Naukri profile into `data/profile.json` and merges it with the
 resume. Worth doing for one reason: Naukri's IT-skills table carries per-skill
 durations it maintains itself, which beat a number typed into a CV years ago.
 Where the two disagree, the profile wins.
+
+### Optionally: push your resume back to Naukri
+
+```bash
+python main.py --upload-resume --dry-run          # show what would change
+python main.py --upload-resume                    # newest file in data/resume/
+python main.py --upload-resume cv.pdf --as-name "Your Name Resume.pdf"
+```
+
+The one command here that *writes* to your account. It replaces the attached
+resume and nothing else - it never touches the delete-resume control, so a
+failed upload leaves the old file in place rather than leaving you with none.
+
+Success is confirmed by reading back the filename Naukri displays and checking
+it changed, because the toast does not always fire and a silent no-op would
+otherwise look like a successful update. Format and size are checked against
+Naukri's own limits (doc/docx/rtf/pdf, 2 MB) before the browser opens.
+
+Two things worth knowing before you run it: the filename is shown to recruiters,
+which is what `--as-name` is for, and the upload bumps your profile's freshness
+date - normally what you want, since recency drives recruiter search ranking.
 
 ## Where jobs come from
 
@@ -351,7 +363,7 @@ overwrites it until you re-run `--resume`.
 python -m pytest tests/ -q
 ```
 
-74 tests, no network. They cover the parts that quietly go wrong: role
+110 tests, no network. They cover the parts that quietly go wrong: role
 detection (every shipped pack, plus the resumes it should refuse to classify),
 scoring (a bug here ranks the wrong jobs and looks like it worked), search
 derivation, resume parsing, config layering, and a check that no personal data

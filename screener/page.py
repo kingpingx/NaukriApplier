@@ -82,16 +82,42 @@ def _salary_of(card: dict) -> str:
 
 
 def build_rows(results: dict, seen: dict, today: str) -> list[dict]:
-    """Flatten both boards into one row list, stamping first-seen dates."""
+    """Flatten both boards into one row list, stamping first-seen dates.
+
+    Accepts either shape of results dict, which is not cosmetic: `scan.write`
+    calls this with {"shortlist", "review"} while this function only ever read
+    {"naukri", "linkedin"}. The keys never matched, `build_rows` returned an
+    empty list every single run, and the page was written with zero rows in it
+    - silently, because an empty page is still a valid page. The scan log said
+    "Wrote 0 row(s)" and nothing treated that as an error.
+    """
     rows = []
 
-    for job in results.get("naukri") or []:
-        job_id = f"naukri:{job.get('job_id')}"
+    naukri = list(results.get("naukri") or [])
+    if not naukri:
+        # Deduped on job_id: a job can legitimately appear in only one band,
+        # but a caller merging bands itself should not produce doubles here.
+        merged, seen_ids = [], set()
+        for band in ("shortlist", "review"):
+            for job in results.get(band) or []:
+                key = job.get("job_id")
+                if key in seen_ids:
+                    continue
+                seen_ids.add(key)
+                merged.append(job)
+        naukri = merged
+
+    for job in naukri:
+        # Himalayas ids already carry their own prefix, and double-prefixing
+        # them would mint a new seen.json key for a job already tracked - so
+        # every one of them would read as NEW on every run, forever.
+        raw = str(job.get("job_id") or "")
+        job_id = raw if ":" in raw else f"naukri:{raw}"
         first = seen.setdefault(job_id, today)
         location = job.get("location") or ""
         rows.append({
             "id": job_id,
-            "board": "Naukri",
+            "board": "Himalayas" if job.get("source") == "himalayas" else "Naukri",
             "title": job.get("title") or "",
             "company": job.get("company") or "",
             "location": location,
@@ -301,6 +327,18 @@ TEMPLATE = """<title>__TITLE__</title>
   }
   .rank small { display: block; font-size: 9.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 
+  /* Shown whenever a filter is hiding rows. Without it the tiles report one
+     number and the list shows another, and a stale chip looks like a bug in
+     the scan rather than a filter left switched on. */
+  #filter-note {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    margin: 0 0 14px; padding: 10px 14px; font-size: 13.5px;
+    color: var(--new); background: var(--new-soft);
+    border: 1px solid color-mix(in srgb, var(--new) 32%, var(--line));
+    border-radius: 10px;
+  }
+  #filter-note[hidden] { display: none; }
+
   .empty { color: var(--muted); padding: 26px 0; text-align: center; }
   footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
   footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
@@ -342,6 +380,11 @@ TEMPLATE = """<title>__TITLE__</title>
     <button class="chip" data-posted="7" aria-pressed="false">7 days</button>
     <span class="spacer"></span>
     <input class="search" id="q" type="search" placeholder="Filter by title or company" aria-label="Filter by title or company">
+  </div>
+
+  <div id="filter-note" hidden>
+    <span id="fn-text"></span>
+    <button class="chip" id="clear-filters">Show all</button>
   </div>
 
   <div id="list"></div>
@@ -418,7 +461,7 @@ TEMPLATE = """<title>__TITLE__</title>
   function render() {
     const list = document.getElementById('list');
     const shown = ROWS.filter(visible);
-    const boards = ['Naukri', 'LinkedIn'];
+    const boards = ['Naukri', 'Himalayas', 'LinkedIn'];
     let html = '';
     boards.forEach(board => {
       const group = shown.filter(r => r.board === board);
@@ -433,12 +476,26 @@ TEMPLATE = """<title>__TITLE__</title>
 
   function stats() {
     const n = (id, v) => document.getElementById(id).textContent = v;
+    // Count what is on screen, not what was collected. These used to report
+    // ROWS.length unconditionally, so with a filter on the page said "80
+    // openings, 80 new today" above a list of 24 - which reads as a broken
+    // scan rather than an active filter.
+    const shown = ROWS.filter(visible);
     const doneCount = ROWS.filter(r => applied[r.id]).length;
-    n('s-total', ROWS.length);
-    n('s-new', ROWS.filter(r => r.new).length);
-    n('s-remote', ROWS.filter(r => r.remote).length);
+    n('s-total', shown.length);
+    n('s-new', shown.filter(r => r.new).length);
+    n('s-remote', shown.filter(r => r.remote).length);
     n('s-applied', doneCount);
     n('s-left', ROWS.length - doneCount);
+
+    const hidden = ROWS.length - shown.length;
+    const note = document.getElementById('filter-note');
+    note.hidden = hidden === 0;
+    if (hidden) {
+      document.getElementById('fn-text').textContent =
+        'Showing ' + shown.length + ' of ' + ROWS.length +
+        ' — a filter is hiding ' + hidden + '.';
+    }
   }
 
   document.getElementById('list').addEventListener('change', (e) => {
@@ -465,6 +522,18 @@ TEMPLATE = """<title>__TITLE__</title>
   wire('.chip[data-filter]', chip => { filter = chip.dataset.filter; });
   wire('.chip[data-posted]', chip => {
     postedMax = chip.dataset.posted === 'any' ? null : Number(chip.dataset.posted);
+  });
+
+  document.getElementById('clear-filters').addEventListener('click', () => {
+    filter = 'all';
+    postedMax = null;
+    query = '';
+    document.getElementById('q').value = '';
+    document.querySelectorAll('.chip[data-filter]').forEach(c =>
+      c.setAttribute('aria-pressed', String(c.dataset.filter === 'all')));
+    document.querySelectorAll('.chip[data-posted]').forEach(c =>
+      c.setAttribute('aria-pressed', String(c.dataset.posted === 'any')));
+    render();
   });
 
   document.getElementById('q').addEventListener('input', (e) => {

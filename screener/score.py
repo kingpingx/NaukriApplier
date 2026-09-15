@@ -77,6 +77,21 @@ def _skill_key(skill: str, synonyms: dict) -> str:
     return " ".join(_norm(skill, synonyms).split())
 
 
+def _gate_hit(term: str, haystack: str, synonyms: dict) -> bool:
+    """Whether a `must_have_any` term appears in a job, as a word.
+
+    Normalising strips the punctuation, so "c#" becomes the single letter "c" -
+    and a plain `in` then finds it inside "data scientist". One term like that
+    in the gate lets every job through and the gate silently stops working, so
+    the match is anchored to word boundaries, and a term normalising to a single
+    character is only ever matched as a whole word.
+    """
+    key = _skill_key(term, synonyms)
+    if not key:
+        return False
+    return re.search(rf"(?<![a-z0-9]){re.escape(key)}(?![a-z0-9])", haystack) is not None
+
+
 def _weights(config: dict) -> dict:
     weights = dict(DEFAULT_WEIGHTS)
     for key, value in (config.get("weights") or {}).items():
@@ -115,11 +130,26 @@ def hard_reject(job, config: dict) -> str | None:
         if needle and needle in description_l:
             return f"description contains '{word}'"
 
+    # A hard geography filter, distinct from `preferred_locations`, which only
+    # feeds the location component of the score and can never keep a Bengaluru
+    # job off a shortlist for someone who will not move there.
+    #
+    # A job that states no location at all is kept, deliberately - same rule as
+    # `min_salary_lpa`. Plenty of Naukri postings leave it blank, and silently
+    # dropping every one of them loses more good jobs than the filter saves.
+    allowed = config.get("allowed_locations") or []
+    if allowed:
+        stated = (job.location or "").strip()
+        if stated and not any(str(a).strip().lower() in stated.lower()
+                              for a in allowed if str(a).strip()):
+            return f"location '{stated}' is outside allowed_locations"
+
     must_have = config.get("must_have_any") or []
     if must_have:
         haystack = _norm(" ".join([job.title or "", " ".join(job.skills or []),
                                    job.description or ""]), synonyms)
-        if not any(_skill_key(term, synonyms) in haystack for term in must_have if str(term).strip()):
+        if not any(_gate_hit(term, haystack, synonyms)
+                   for term in must_have if str(term).strip()):
             return "matches none of must_have_any"
 
     years = config.get("profile_years")
@@ -132,7 +162,7 @@ def hard_reject(job, config: dict) -> str | None:
     if floor is not None:
         stated = _salary_lpa(job)
         if stated is not None and stated < float(floor):
-            return f"pays {stated:g} LPA, floor is {float(floor):g}"
+            return f"pays up to {stated:g} LPA, floor is {float(floor):g}"
 
     return None
 
@@ -141,16 +171,17 @@ _SALARY = re.compile(r"(\d+(?:\.\d+)?)\s*(?:-|–|to)?\s*(\d+(?:\.\d+)?)?\s*(?:l
 
 
 def _salary_lpa(job) -> float | None:
-    """The low end of a stated salary range, in lakhs per annum.
+    """The top of a stated salary range, in lakhs per annum.
 
-    The low end on purpose: a "5-25 LPA" posting is a 5 LPA posting with room,
-    and filtering on the top of the band lets every wide range through.
+    The top on purpose: a "15-25 LPA" posting can pay 20, and the floor exists
+    to drop jobs that cannot reach it, not ones that might. The cost is that a
+    wide "5-25" range gets through too. A single figure is its own top.
     """
     match = _SALARY.search(job.salary_label or "")
     if not match:
         return None
     try:
-        return float(match.group(1))
+        return float(match.group(2) or match.group(1))
     except (TypeError, ValueError):
         return None
 
