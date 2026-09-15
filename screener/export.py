@@ -130,6 +130,7 @@ def to_excel(jobs: list, path: Path, ledger: Ledger | None = None,
     """Write the ranked jobs to an .xlsx. Returns the path written."""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
+    from .sources.boards import LABELS as BOARD_LABELS
     from openpyxl.utils import get_column_letter
     from openpyxl.worksheet.datavalidation import DataValidation
 
@@ -180,7 +181,9 @@ def to_excel(jobs: list, path: Path, ledger: Ledger | None = None,
             cell = sheet.cell(row=row, column=column, value=value)
             cell.alignment = Alignment(vertical="top", wrap_text=column in (3, 4, 5, 9, 15))
 
-        naukri_cell = sheet.cell(row=row, column=10, value="Apply")
+        # Say which board the link opens - the sheet mixes Naukri with the rest.
+        naukri_cell = sheet.cell(row=row, column=10,
+                                 value=f"Apply on {BOARD_LABELS.get(job.source or '', 'Naukri')}")
         naukri_cell.hyperlink = job.url
         naukri_cell.font = link_font
 

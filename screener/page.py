@@ -489,8 +489,10 @@ TEMPLATE = """<title>__TITLE__</title>
           '<div class="company">' + esc(r.company) + '</div>' +
           '<div class="tags">' + tags + '</div>' +
           (r.note ? '<div class="note">' + esc(r.note) + '</div>' : '') +
-          (r.career ? '<div class="note">Apply at the employer: <a href="' + esc(r.career) +
-            '" target="_blank" rel="noopener">' + esc(r.career_kind || 'career page') + '</a></div>' : '') +
+          '<div class="note">Apply <a href="' + esc(r.url) + '" target="_blank" rel="noopener">on ' + esc(r.board) + '</a>' +
+            (r.career ? ' &middot; <a href="' + esc(r.career) + '" target="_blank" rel="noopener">at the employer</a> (' +
+              esc(r.career_kind || 'career page') + ')' : '') +
+          '</div>' +
         '</div>' +
         '<div class="meta"><div>' + (r.location ? esc(r.location) : '&mdash;') + '</div>' +
           (r.salary ? '<div>' + esc(r.salary) + '</div>' : '') + '</div>' +

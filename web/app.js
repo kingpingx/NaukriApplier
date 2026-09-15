@@ -616,16 +616,22 @@ async function findCareer(company, title) {
   return { careerUrl: searchUrl(company, title), careerKind: 'web search' };
 }
 
+// One "Apply" line per card: the listing on its board, then the employer's own
+// page when there is one - or the button that goes looking for it.
 function careerHtml(j) {
+  const board = `<a href="${esc(safeUrl(j.url))}" target="_blank" rel="noopener">on ${esc(LABELS[j.source] || 'Naukri')}</a>`;
+  let employer = '';
   if (j.careerUrl) {
     // A general careers page from the posting can still be narrowed to the opening.
     const narrow = j.careerKind === KIND_CAREERS && !j.careerTried && CAREER_BOARDS.has(j.source)
       ? ` · <button type="button" class="linkish" data-find="${esc(j.id)}">find the exact posting</button>` : '';
-    return `<p class="career">Apply at the employer: <a href="${esc(safeUrl(j.careerUrl))}" target="_blank" rel="noopener">${esc(j.careerKind || 'career page')}</a>${narrow}</p>`;
+    employer = ` · <a href="${esc(safeUrl(j.careerUrl))}" target="_blank" rel="noopener">at the employer</a>` +
+      ` <span class="muted">(${esc(j.careerKind || 'career page')})</span>${narrow}`;
+  } else if (CAREER_BOARDS.has(j.source)) {
+    employer = ` · <button type="button" class="linkish" data-find="${esc(j.id)}">find the employer's page</button>` +
+      ` · <a href="${esc(searchUrl(j.company, j.title))}" target="_blank" rel="noopener">search</a>`;
   }
-  if (!CAREER_BOARDS.has(j.source)) return '';
-  return `<p class="career"><button type="button" class="linkish" data-find="${esc(j.id)}">Find the employer's page</button>
-    · <a href="${esc(searchUrl(j.company, j.title))}" target="_blank" rel="noopener">search</a></p>`;
+  return `<p class="career">Apply ${board}${employer}</p>`;
 }
 
 const JOBS = new Map();
@@ -845,6 +851,8 @@ async function boot() {
   for (const tab of document.querySelectorAll('.tab')) {
     tab.addEventListener('click', () => { history.replaceState(null, '', '#' + tab.dataset.tab); showTab(tab.dataset.tab); });
   }
+  // Back/forward and pasted links change only the hash - follow it.
+  window.addEventListener('hashchange', () => showTab(location.hash === '#scan' ? 'scan' : 'search'));
   showTab(location.hash === '#scan' ? 'scan' : 'search');
 }
 

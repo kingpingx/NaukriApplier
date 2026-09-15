@@ -1450,6 +1450,19 @@ class TestCareers:
         assert job.career_url == "https://jobs.lever.co/acme/123"
         assert job.career_kind == "apply link in the posting"
 
+    def test_spreadsheet_links_the_board_and_the_employer(self, tmp_path):
+        from openpyxl import load_workbook
+        from screener.export import to_excel
+        job = make_job(job_id="weworkremotely:x", source="weworkremotely",
+                       url="https://weworkremotely.com/remote-jobs/x",
+                       career_url="https://jobs.lever.co/acme/1", career_kind="exact posting on Lever")
+        job.score, job.score_breakdown, job.matched_skills = 80.0, {}, []
+        path = to_excel([job], tmp_path / "t.xlsx", SimpleNamespace(status=lambda _id: None))
+        sheet = load_workbook(path).active
+        assert sheet.cell(2, 10).value == "Apply on We Work Remotely"
+        assert sheet.cell(2, 10).hyperlink.target == "https://weworkremotely.com/remote-jobs/x"
+        assert sheet.cell(2, 16).hyperlink.target == "https://jobs.lever.co/acme/1"
+
     def test_the_page_row_carries_the_employer_link(self):
         rows = page_mod.build_rows(
             {"shortlist": [{"job_id": "weworkremotely:x", "title": "T", "company": "C", "url": "u",
