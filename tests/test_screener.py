@@ -1283,6 +1283,13 @@ class TestBoards:
         other = Job(job_id="remoteok:10", title="QA Lead", company="Acme", url="c")
         assert scan_mod.dedupe([first, again, other]) == [first, other]
 
+    def test_same_title_twice_on_naukri_is_kept(self):
+        """Different cities or bands at one company - real openings, not copies."""
+        pune = Job(job_id="111", title=".NET Developer", company="TCS", url="a", source="search")
+        hyd = Job(job_id="222", title=".NET Developer", company="TCS", url="b", source="recommended")
+        remote = Job(job_id="remotive:9", title=".NET Developer", company="TCS", url="c", source="remotive")
+        assert scan_mod.dedupe([pune, hyd, remote]) == [pune, hyd], "only the other board's copy goes"
+
     def test_page_labels_every_board(self):
         rows = page_mod.build_rows(
             {"shortlist": [{"job_id": "weworkremotely:x", "title": "T", "company": "C",

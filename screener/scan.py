@@ -132,13 +132,19 @@ def dedupe(jobs: list) -> list:
     Remote companies post one role to three boards at once; without this the
     shortlist fills with one job three times. Order is preserved, so the main
     source wins, then boards in the order `boards:` lists them.
+
+    Only across boards, never within one. Two Naukri postings with the same
+    title at the same company are usually different openings - another city,
+    another experience band - and merging them dropped 42 of 301 Naukri jobs
+    on the first scan after this was added.
     """
-    kept, keys = [], set()
+    from .sources.boards import READERS
+    kept, first_board = [], {}
     for job in jobs:
         key = _same_job_key(job)
-        if all(key) and key in keys:
+        board = job.source if job.source in READERS else "naukri"
+        if all(key) and first_board.setdefault(key, board) != board:
             continue
-        keys.add(key)
         kept.append(job)
     return kept
 
