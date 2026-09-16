@@ -1,4 +1,4 @@
-"""Add rows to the IT skills table on your Naukri profile.
+"""Add and edit rows in the IT skills table on your Naukri profile.
 
 Key skills say what you know; this table says for how long. Each row carries a
 version, the year you last used it and your experience with it, and an empty
@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 from datetime import date
 
+from . import selectors as S
 from .edit import EditError, _click_first, _fill_first, _pick_suggestion, _type_first, reveal
 from .employment import _pick_dropdown
 
@@ -27,6 +28,9 @@ log = logging.getLogger("screener.itskills")
 
 CARD = "#lazyITSkills"
 ADD = [f"{CARD} .widgetHead .add"]
+ROWS = f"{CARD} .widgetCont li.collection"
+ROW_CELLS = "span.col"
+ROW_EDIT = "span.icon.edit"
 NAME = ["#itSkillSugg"]
 VERSION = ["#version"]
 LAST_USED = "#lastUsedDroopeFor"
@@ -46,6 +50,11 @@ def years_label(years: int) -> str:
 def months_label(months: int) -> str:
     """The Months dropdown's own wording: "0 Month", "1 Month", "2 Months"."""
     return f"{months} Month" + ("s" if months > 1 else "")
+
+
+def experience_label(years: int, months: int = 0) -> str:
+    """How the saved card writes a duration: "1 Year 0 Month", "2 Years 0 Month"."""
+    return f"{years_label(years)} {months_label(months)}"
 
 
 def check(name: str, last_used: int | None, years: int | None, months: int | None) -> None:
@@ -115,4 +124,80 @@ def add(page, name: str, version: str = "", last_used: int | None = None,
         raise EditError(f"{name!r} is not in your IT skills after saving - the dialog "
                         f"probably rejected a field. Nothing else was changed.")
     log.info("Added IT skill: %s", name)
+    return {"before": before, "after": after}
+
+
+def _row(page, name: str):
+    """The table row whose skill cell reads `name`, or None."""
+    want = name.strip().lower()
+    rows = page.locator(ROWS)
+    for i in range(rows.count()):
+        texts = rows.nth(i).locator(ROW_CELLS).all_inner_texts()
+        if texts and texts[0].strip().lower() == want:
+            return rows.nth(i)
+    return None
+
+
+def cells(page, name: str) -> list[str] | None:
+    """One row as [skill, version, last used, experience], or None if absent."""
+    row = _row(page, name)
+    if row is None:
+        return None
+    return [t.strip() for t in row.locator(ROW_CELLS).all_inner_texts()][:4]
+
+
+def update(page, name: str, last_used: int | None = None,
+           years: int | None = None, months: int | None = None) -> dict:
+    """Change an existing row's last-used year and experience, then read it back.
+
+    Only the fields given are touched: a row whose version you typed by hand keeps
+    it. Saved means the card shows the new values - the dialog closing is not proof.
+    """
+    check(name, last_used, years, months)
+    if last_used is None and years is None:
+        raise EditError(f"{name}: nothing to change - give a last-used year, "
+                        "an experience, or both.")
+
+    reveal(page)
+    row = _row(page, name)
+    if row is None:
+        raise EditError(f"{name!r} is not in your IT skills - add it rather than edit it.")
+    before = cells(page, name)
+
+    icon = row.locator(ROW_EDIT).first
+    try:
+        icon.scroll_into_view_if_needed(timeout=6000)
+        icon.click(timeout=6000)
+    except Exception:
+        icon.dispatch_event("click")
+    page.wait_for_timeout(2000)
+
+    if last_used is not None:
+        _pick_dropdown(page, LAST_USED, str(last_used), "last used")
+    if years is not None:
+        _pick_dropdown(page, YEARS, years_label(years), "experience years")
+        _pick_dropdown(page, MONTHS, months_label(months or 0), "experience months")
+
+    _click_first(page, SAVE, "IT skill save")
+    page.wait_for_timeout(3000)
+    reveal(page)
+    after = cells(page, name)
+    if after is None:
+        # The card is lazy-mounted and can drop out of the DOM after a save, which
+        # would read as the row having vanished. Reload once before believing that.
+        page.goto(S.PROFILE_URL, wait_until="domcontentloaded")
+        page.wait_for_timeout(4000)
+        reveal(page)
+        after = cells(page, name)
+    if after is None:
+        raise EditError(f"{name!r} is not in your IT skills after saving - check the profile.")
+
+    wrong = []
+    if last_used is not None and after[2] != str(last_used):
+        wrong.append(f"last used reads {after[2]!r}, not {last_used}")
+    if years is not None and after[3] != experience_label(years, months or 0):
+        wrong.append(f"experience reads {after[3]!r}, not {experience_label(years, months or 0)!r}")
+    if wrong:
+        raise EditError(f"{name} did not save as asked: {'; '.join(wrong)}.")
+    log.info("Updated IT skill %s: %s", name, " | ".join(after[1:]))
     return {"before": before, "after": after}

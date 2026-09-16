@@ -707,6 +707,21 @@ class TestProfileRows:
     def test_a_blank_duration_is_allowed(self):
         itskills_mod.check("Docker", 2026, None, None)
 
+    def test_experience_label_matches_the_saved_card(self):
+        """Read back from the live card: an edit verifies against exactly this text."""
+        assert itskills_mod.experience_label(1) == "1 Year 0 Month"
+        assert itskills_mod.experience_label(2) == "2 Years 0 Month"
+        assert itskills_mod.experience_label(4, 2) == "4 Years 2 Months"
+        assert itskills_mod.experience_label(0) == "0 Year 0 Month"
+
+    def test_an_edit_that_changes_nothing_is_refused_before_touching_the_page(self):
+        with pytest.raises(edit_mod.EditError, match="nothing to change"):
+            itskills_mod.update(None, "Docker")
+
+    def test_an_edit_with_a_bad_year_is_refused_before_touching_the_page(self):
+        with pytest.raises(edit_mod.EditError):
+            itskills_mod.update(None, "Docker", last_used=2099, years=1)
+
     def test_listed_matches_whole_cells_not_substrings(self):
         lines = ["IT skills", "PostgreSQL", "c#"]
         assert not itskills_mod.listed("SQL", lines)
