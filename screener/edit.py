@@ -44,7 +44,25 @@ class EditError(RuntimeError):
 
 
 def _click_first(page, candidates: list[str], what: str, timeout: int = 8000):
-    """Click the first candidate selector that resolves. Raises if none do."""
+    """Click the first candidate selector that resolves. Raises if none do.
+
+    Two passes. The first is a real click - scrolled into view, with Playwright's
+    actionability checks - which is what a user does and what we want wherever it
+    works. The second dispatches the event straight at the node.
+
+    That second pass exists because some of Naukri's icon controls render as a
+    zero-size span with the glyph painted by CSS: the IT-skills "Add details"
+    control is `<span class="add no-outline"></span>` at 0x0. A real click cannot
+    reach a box with no area - Playwright reports it as outside the viewport even
+    with force=True - so before this, ten perfectly valid IT-skill rows failed
+    with "Naukri has probably reshipped the markup" against markup that had not
+    changed at all.
+
+    Dispatching skips the visibility checks, so it can fire at something a user
+    could not actually press. That is safe here only because every write in this
+    package reads the saved page back before returning: a dispatch that lands on
+    a dead control fails verification rather than reporting a clean save.
+    """
     for selector in candidates:
         try:
             node = page.locator(selector).first
@@ -55,6 +73,19 @@ def _click_first(page, candidates: list[str], what: str, timeout: int = 8000):
         except Exception as exc:
             log.debug("%s: %s did not click (%s)", what, selector, exc)
             continue
+
+    for selector in candidates:
+        try:
+            node = page.locator(selector).first
+            if node.count():
+                node.dispatch_event("click")
+                log.debug("%s: %s clicked by dispatch (zero-size or covered node)",
+                          what, selector)
+                return True
+        except Exception as exc:
+            log.debug("%s: %s did not dispatch (%s)", what, selector, exc)
+            continue
+
     raise EditError(
         f"Could not find the {what} control.\n"
         f"  Naukri has probably reshipped the markup - fix the selectors in "
