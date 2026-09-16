@@ -832,6 +832,87 @@ class TestRefreshPlan:
         assert refresh_mod.status_line(tmp_path / "none.json") is None
 
 
+class TestRefreshRotation:
+    """A schedule that runs hourly makes one edit per run, a different kind each time."""
+
+    POOL = ["Docker", "Jenkins"]
+    CITIES = ["Noida", "Chennai"]
+    HEADLINE = "Backend engineer - C#, .NET, Azure"
+    ALL = ["skill", "headline", "location"]
+
+    def test_the_first_run_takes_the_first_kind(self):
+        assert refresh_mod.next_kind({}, self.ALL) == "skill"
+
+    def test_each_run_takes_the_next_kind(self):
+        assert refresh_mod.next_kind({"last_kind": "skill"}, self.ALL) == "headline"
+        assert refresh_mod.next_kind({"last_kind": "headline"}, self.ALL) == "location"
+
+    def test_the_cycle_wraps(self):
+        assert refresh_mod.next_kind({"last_kind": "location"}, self.ALL) == "skill"
+
+    def test_an_unavailable_kind_is_not_waited_on(self):
+        """With no location pool, the cycle is skill -> headline, not a wasted run."""
+        assert refresh_mod.next_kind({"last_kind": "skill"}, ["skill", "headline"]) == "headline"
+        assert refresh_mod.next_kind({"last_kind": "headline"}, ["skill", "headline"]) == "skill"
+
+    def test_a_last_kind_that_is_no_longer_available_restarts_the_cycle(self):
+        assert refresh_mod.next_kind({"last_kind": "location"}, ["skill", "headline"]) == "skill"
+
+    def test_nothing_available_is_no_kind(self):
+        assert refresh_mod.next_kind({"last_kind": "skill"}, []) is None
+
+    def test_only_restricts_the_plan_to_one_kind(self):
+        todo = refresh_mod.plan(["C#"], self.HEADLINE, self.POOL, {}, only="skill")
+        assert todo["skill"] == ("add", "Docker")
+        assert todo["headline"] is None, "a skill run must not also touch the headline"
+
+    def test_only_headline_leaves_the_skills_alone(self):
+        todo = refresh_mod.plan(["C#"], self.HEADLINE, self.POOL, {}, only="headline")
+        assert todo["skill"] is None
+        assert todo["headline"] == self.HEADLINE + "."
+
+    def test_without_only_every_kind_still_runs(self):
+        """The default is unchanged, which is what one run a day wants."""
+        todo = refresh_mod.plan(["C#"], self.HEADLINE, self.POOL, {})
+        assert todo["skill"] == ("add", "Docker") and todo["headline"] == self.HEADLINE + "."
+
+    def test_a_city_is_added_then_taken_back_off(self):
+        todo = refresh_mod.plan([], None, [], {}, toggle_headline=False,
+                                locations=["Pune"], location_pool=self.CITIES,
+                                only="location")
+        assert todo["location"] == ("add", "Noida")
+        todo = refresh_mod.plan([], None, [], {"added_location": "Noida"},
+                                toggle_headline=False, locations=["Pune", "Noida"],
+                                location_pool=self.CITIES, only="location")
+        assert todo["location"] == ("remove", "Noida")
+
+    def test_a_city_you_chose_yourself_is_never_removed(self):
+        """Noida is in the pool and on the profile, but this job did not put it there."""
+        todo = refresh_mod.plan([], None, [], {}, toggle_headline=False,
+                                locations=["Pune", "Noida"], location_pool=self.CITIES,
+                                only="location")
+        assert todo["location"] == ("add", "Chennai")
+
+    def test_no_location_pool_means_no_location_change(self):
+        todo = refresh_mod.plan([], None, [], {}, toggle_headline=False,
+                                locations=["Pune"], location_pool=[], only="location")
+        assert todo["location"] is None
+
+    def test_a_failed_run_does_not_advance_the_rotation(self, tmp_path):
+        """Otherwise one broken selector quietly halves how often the date moves."""
+        path = tmp_path / "refresh.json"
+        record = {"last_kind": "skill"}
+        refresh_mod._finish(record, path, {"changes": [], "errors": ["boom"]}, kind="headline")
+        assert refresh_mod.load_record(path)["last_kind"] == "skill"
+
+    def test_a_run_that_changed_something_advances_it(self, tmp_path):
+        path = tmp_path / "refresh.json"
+        record = {"last_kind": "skill"}
+        refresh_mod._finish(record, path, {"changes": ["headline: added a full stop"],
+                                           "errors": []}, kind="headline")
+        assert refresh_mod.load_record(path)["last_kind"] == "headline"
+
+
 class TestNotify:
     def test_missing_notify_send_is_a_quiet_no_op(self, monkeypatch):
         monkeypatch.setattr(notify_mod.shutil, "which", lambda name: None)

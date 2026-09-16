@@ -296,8 +296,13 @@ def cmd_refresh(dry_run: bool, headless: bool, notify: bool) -> int:
     paths.ensure()
     pool = refresh_mod.pool_from(_config_value("refresh_skills"))
     toggle_headline = _config_value("refresh_headline")
+    # Rotating suits a schedule that runs several times a day: one edit per run,
+    # a different kind each time, instead of every kind on every run.
     result = refresh_mod.run(pool, toggle_headline=toggle_headline is not False,
-                             headless=headless, dry_run=dry_run)
+                             headless=headless, dry_run=dry_run,
+                             rotate=bool(_config_value("refresh_rotate")),
+                             location_pool=refresh_mod.pool_from(
+                                 _config_value("refresh_locations")))
     print(refresh_mod.summarise(result))
     if result["errors"] and not dry_run:
         return _fail("Profile refresh: " + "; ".join(result["errors"]), 2, notify,

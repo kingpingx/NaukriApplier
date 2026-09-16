@@ -64,9 +64,12 @@ DEFAULTS = {
     "weworkremotely": {},          # categories: which RSS feeds to read
     "apify": {},                   # token, actor, proxy - see docs/apify.md
 
-    # --- daily profile refresh - see screener/refresh.py -----------------
+    # --- profile refresh - see screener/refresh.py ------------------------
     "refresh_skills": [],          # real skills of yours it may add and take back
     "refresh_headline": True,      # also flip the headline's trailing full stop
+    "refresh_locations": [],       # cities it may add to your preferred list and take back
+    "refresh_rotate": False,       # one kind of edit per run, cycling - for schedules
+                                   # that run more than once a day
 
     # --- scoring ---------------------------------------------------------
     "synonyms": {},                # merged over the role pack's own
