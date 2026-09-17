@@ -301,6 +301,22 @@ RESUME_UPLOADED_ON = [
 # thrown exception, so it has to be read deliberately.
 RESUME_MSG_BOX = "#attachCVMsgBox"
 
+# The call that attaches an uploaded file to the profile: the file goes to
+# filevalidation.naukri.com first, then POST .../profiles/<id>/advResume hands
+# its fileKey over and answers {"status": true} on success. Matched on the end
+# of the path, since the profile id in the middle is per account.
+# Verified against a live same-file re-upload on 2026-09-17.
+RESUME_ATTACH_ENDPOINT = "/advResume"
+
+# The download icon on the resume card. Exact titles only, never a looser match
+# on "icon" or position: the delete-resume icon is the very next control, with
+# identical markup apart from its title.
+# Verified against a live download on 2026-09-17.
+RESUME_DOWNLOAD = [
+    "#lazyAttachCV span.icon-wrap[title='download-resume']",
+    "#lazyAttachCV i[title='Click here to download your resume']",
+]
+
 # Naukri's own stated limits, printed under the upload button. Checked locally
 # before the browser opens: a file that breaches them is rejected server-side
 # with a message that is easy to miss, and the old resume silently survives.

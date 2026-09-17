@@ -35,6 +35,8 @@ PROFILE_TXT = HOME / "profile.txt"
 PROFILE_PNG = HOME / "profile.png"
 RESUME_JSON = HOME / "resume.json"        # parsed resume facts
 REFRESH_STATE = HOME / "refresh.json"     # what --refresh-profile last changed
+UPLOAD_STATE = HOME / "upload.json"       # how the last resume upload went
+NAUKRI_RESUME_DIR = HOME / "naukri_resume"  # the attached resume, downloaded to re-upload
 
 JOBS_DIR = HOME / "jobs"
 LEDGER_PATH = JOBS_DIR / "ledger.json"

@@ -30,6 +30,7 @@ from screener import schedule as schedule_mod
 from screener import score as score_mod
 from screener import search as search_mod
 from screener import session as session_mod
+from screener import upload as upload_mod
 from screener.model import Job
 
 
@@ -759,9 +760,25 @@ class TestSchedule:
         unit = schedule_mod.service_unit(Path("/repo"), "/repo/.venv/bin/python", job="refresh")
         assert '"/repo/main.py" --refresh-profile --headless --notify' in unit
 
-    def test_only_the_refresh_starts_at_a_varying_minute(self):
+    def test_profile_writers_start_at_a_varying_minute_but_scans_do_not(self):
         assert "RandomizedDelaySec=20m" in schedule_mod.timer_unit(["09:30"], job="refresh")
+        assert "RandomizedDelaySec=5m" in schedule_mod.timer_unit(["09:30"], job="upload")
         assert "RandomizedDelaySec" not in schedule_mod.timer_unit(["09:30"])
+
+    def test_upload_service_reuploads_the_resume_already_on_naukri(self):
+        """Not --upload-resume: that one takes whatever is newest in data/resume/."""
+        unit = schedule_mod.service_unit(Path("/repo"), "/repo/.venv/bin/python", job="upload")
+        assert '"/repo/main.py" --reupload-resume --headless --notify' in unit
+
+    def test_windows_upload_task_fires_at_both_times(self):
+        xml = schedule_mod.task_xml(["09:30", "14:30"], "upload", Path("repo"), "python.exe")
+        assert "T09:30:00</StartBoundary>" in xml and "T14:30:00</StartBoundary>" in xml
+        assert xml.count("<CalendarTrigger>") == 2
+        assert "<RandomDelay>PT5M" in xml
+        assert "--reupload-resume --headless --notify</Arguments>" in xml
+
+    def test_upload_is_its_own_task_not_a_replacement_for_the_refresh(self):
+        assert schedule_mod.JOBS["upload"]["unit"] != schedule_mod.JOBS["refresh"]["unit"]
 
     def test_windows_task_runs_daily_on_your_desktop_and_catches_up(self):
         xml = schedule_mod.task_xml(["09:30", "18:00"], "refresh", Path("repo"), "python.exe")
@@ -789,6 +806,74 @@ class TestSchedule:
         create = next(c for c in calls if "/Create" in c)
         assert create[create.index("/TN") + 1] == "naukri-refresh"
         assert "<StartWhenAvailable>true" in xmls[0]
+
+
+class TestUploadConfirmation:
+    """A re-upload of the same file is proved by Naukri's answer, not by the card."""
+
+    CARD = {"name": "Resume.pdf", "uploaded_on": "Uploaded on Sep 17, 2026"}
+    SUCCESS = '{"description":"Request completed successfully","status":true}'
+
+    def test_naukris_success_reply_is_a_success(self):
+        assert upload_mod.attach_outcome(200, self.SUCCESS) == {
+            "ok": True, "http": 200, "detail": "Request completed successfully"}
+
+    @pytest.mark.parametrize("http, body", [
+        (200, '{"status": false, "description": "Invalid file"}'),
+        (500, SUCCESS),
+        (200, "<html>Access Denied</html>"),
+        (200, ""),
+    ])
+    def test_anything_short_of_both_saying_yes_is_not(self, http, body):
+        assert not upload_mod.attach_outcome(http, body)["ok"]
+
+    def test_same_file_same_day_counts_once_naukri_confirms(self):
+        """The 2:30 pm case: name and date on the card are already the final ones."""
+        attach = upload_mod.attach_outcome(200, self.SUCCESS)
+        assert upload_mod.landed(self.CARD, dict(self.CARD), attach)
+
+    def test_same_file_with_no_reply_is_not_a_success(self):
+        assert not upload_mod.landed(self.CARD, dict(self.CARD), None)
+        assert not upload_mod.landed(self.CARD, dict(self.CARD), {})
+
+    def test_a_refused_attach_is_not_a_success(self):
+        attach = upload_mod.attach_outcome(200, '{"status": false}')
+        assert not upload_mod.landed(self.CARD, dict(self.CARD), attach)
+
+    def test_a_new_filename_on_the_card_is_proof_on_its_own(self):
+        after = {"name": "New Resume.pdf", "uploaded_on": self.CARD["uploaded_on"]}
+        assert upload_mod.landed(self.CARD, after, None)
+
+    def test_a_card_that_lost_its_filename_is_not_a_rename(self):
+        assert not upload_mod.landed(self.CARD, {"name": None, "uploaded_on": None}, None)
+
+    def test_an_ordinary_resume_name_is_saved_unchanged(self):
+        """It goes back up under this name, and recruiters see it."""
+        assert upload_mod.safe_filename("PrabalDotnet16092026.pdf") == "PrabalDotnet16092026.pdf"
+        assert upload_mod.safe_filename("Prabal Pandey Resume.pdf") == "Prabal Pandey Resume.pdf"
+
+    def test_names_windows_refuses_are_made_saveable(self):
+        assert upload_mod.safe_filename('CV: "final"?.pdf') == "CV_ _final__.pdf"
+        assert upload_mod.safe_filename("..\\..\\escape/Resume.pdf") == "Resume.pdf"
+        assert upload_mod.safe_filename("Resume.pdf. ") == "Resume.pdf"
+
+    def test_no_attached_resume_leaves_no_name(self):
+        assert upload_mod.safe_filename(None) == "" and upload_mod.safe_filename("  ") == ""
+
+    def test_the_download_control_can_never_be_the_delete_icon_beside_it(self):
+        from screener import selectors as selectors_mod
+        assert selectors_mod.RESUME_DOWNLOAD
+        for selector in selectors_mod.RESUME_DOWNLOAD:
+            assert "download" in selector.lower() and "delete" not in selector.lower()
+
+    def test_check_reports_the_last_upload(self, tmp_path):
+        path = tmp_path / "upload.json"
+        assert upload_mod.status_line(path) is None
+        upload_mod.record(True, "Resume.pdf", path)
+        assert "ok (Resume.pdf)" in upload_mod.status_line(path)
+        upload_mod.record(False, "Saved session has expired\nmore", path)
+        line = upload_mod.status_line(path)
+        assert "FAILED: Saved session has expired" in line and "--login" in line
 
 
 class TestRefreshPlan:

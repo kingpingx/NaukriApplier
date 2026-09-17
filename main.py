@@ -8,6 +8,8 @@
     python main.py --upload-resume      replace the resume on your Naukri profile
     python main.py --refresh-profile    one small edit so your profile reads as updated
     python main.py --schedule-refresh   do that every day (09:30 unless you give a time)
+    python main.py --reupload-resume    upload the resume already on Naukri again, same name
+    python main.py --schedule-upload    do that daily (09:30,14:30 unless you give times)
     python main.py --match JOB_URL      check one opening; fix your profile to match
     python main.py --schedule TIMES     scan daily at those times, e.g. 09:00,18:00
     python main.py --scan               search, score, rank, write the results
@@ -169,31 +171,71 @@ def cmd_resume(path_arg: str | None) -> int:
     return 0
 
 
-def cmd_upload_resume(path_arg, as_name: str | None, dry_run: bool, headless: bool) -> int:
-    """Replace the resume on the live Naukri profile."""
+def cmd_upload_resume(path_arg, as_name: str | None, dry_run: bool, headless: bool,
+                      notify: bool = False) -> int:
+    """Replace the resume on the live Naukri profile.
+
+    Real runs are recorded in data/upload.json whatever the outcome, so a
+    scheduled upload that fails shows up in --check, not only in a pop-up.
+    """
     paths.ensure()
     source = Path(path_arg) if path_arg is not True else resume_mod.find_resume()
     if source is None:
-        print(f"\n  No resume found in {paths.RESUME_DIR}."
-              f"\n  Pass one:  python main.py --upload-resume path/to/cv.pdf\n")
-        return 2
+        message = (f"No resume found in {paths.RESUME_DIR}.\n"
+                   f"  Pass one:  python main.py --upload-resume path/to/cv.pdf")
+        if not dry_run:
+            upload_mod.record(False, message.splitlines()[0])
+        return _fail(message, 2, notify, UPLOAD_FAILED)
 
-    staged = upload_mod.staged_copy(source, as_name)
-    upload_mod.check(staged)
-    size_kb = staged.stat().st_size / 1024
+    try:
+        staged = upload_mod.staged_copy(source, as_name)
+        upload_mod.check(staged)
+        size_kb = staged.stat().st_size / 1024
 
-    if dry_run:
-        live = upload_mod.current(headless=headless)
-        print(f"""
+        if dry_run:
+            live = upload_mod.current(headless=headless)
+            print(f"""
   Would upload:  {staged}  ({size_kb:.0f} KB)
   Replacing:     {live.get('name')}  ({live.get('uploaded_on')})
 
   Nothing was changed. Drop --dry-run to do it.
 """)
-        return 0
+            return 0
 
-    print(f"\n  Uploading {staged.name} ({size_kb:.0f} KB) to your Naukri profile...")
-    result = upload_mod.upload(staged, headless=headless)
+        print(f"\n  Uploading {staged.name} ({size_kb:.0f} KB) to your Naukri profile...")
+        result = upload_mod.upload(staged, headless=headless)
+    except Exception as exc:
+        if not dry_run:
+            upload_mod.record(False, str(exc))
+        raise
+    upload_mod.record(True, result["after"].get("name") or staged.name)
+    print(upload_mod.summarise(result))
+    return 0
+
+
+def cmd_reupload_resume(dry_run: bool, headless: bool) -> int:
+    """Upload the resume already attached to Naukri again, under the same name.
+
+    The file is downloaded off the profile first, so what goes up is always what
+    recruiters were already seeing - nothing in data/resume/ is involved.
+    """
+    paths.ensure()
+    try:
+        result = upload_mod.reupload(headless=headless, dry_run=dry_run)
+    except Exception as exc:
+        if not dry_run:
+            upload_mod.record(False, str(exc))
+        raise
+    if dry_run:
+        before = result["before"]
+        print(f"""
+  Would re-upload:  {before.get('name')}  ({before.get('uploaded_on')})
+  Downloaded to:    {result['path']}  ({result['path'].stat().st_size / 1024:.0f} KB)
+
+  Nothing was uploaded. Drop --dry-run to do it.
+""")
+        return 0
+    upload_mod.record(True, result["after"].get("name") or result["path"].name)
     print(upload_mod.summarise(result))
     return 0
 
@@ -284,9 +326,9 @@ def cmd_check() -> int:
     if missing:
         print("\n".join(missing) + "\n")
     from screener import refresh as refresh_mod
-    status = refresh_mod.status_line()
-    if status:
-        print(status + "\n")
+    for status in (refresh_mod.status_line(), upload_mod.status_line()):
+        if status:
+            print(status + "\n")
     return 0
 
 
@@ -340,10 +382,18 @@ def cmd_schedule(times_text: str, job: str = "scan") -> int:
     from screener import schedule as schedule_mod
     times = schedule_mod.parse_times(times_text)
     upcoming = schedule_mod.install(times, job=job)
-    what = "Profile refreshes" if job == "refresh" else "Scans"
+    what = {"refresh": "Profile refreshes", "upload": "Resume uploads"}.get(job, "Scans")
     print(f"\n  {what} scheduled daily at {', '.join(times)}.\n")
     print("\n".join("  " + line for line in upcoming.strip().splitlines()))
-    if job == "refresh":
+    if job == "upload":
+        print("\n  Each run downloads the resume attached to your Naukri profile and uploads\n"
+              "  it again under the same name - no local file is used.\n"
+              f"  It starts within {schedule_mod.JOBS['upload']['jitter_minutes']} minutes "
+              "of each time, in a minimized browser.\n"
+              "  `python main.py --check` shows how the last one went.\n"
+              "  They run only while you are logged in - the browser needs your display.\n"
+              "  Change the times with --schedule-upload again; remove with --unschedule-upload.\n")
+    elif job == "refresh":
         print("\n  Each run starts within 20 minutes of that time, in a minimized browser.\n"
               "  `python main.py --check` shows how the last one went - an expired login\n"
               "  stops it until you run --login again.\n"
@@ -358,7 +408,7 @@ def cmd_schedule(times_text: str, job: str = "scan") -> int:
 
 def cmd_unschedule(job: str = "scan") -> int:
     from screener import schedule as schedule_mod
-    what = "profile refreshes" if job == "refresh" else "scans"
+    what = {"refresh": "profile refreshes", "upload": "resume uploads"}.get(job, "scans")
     print(f"\n  Scheduled {what} removed.\n" if schedule_mod.remove(job)
           else f"\n  No scheduled {what} were installed.\n")
     return 0
@@ -382,6 +432,7 @@ def _expected_errors() -> tuple[type[Exception], ...]:
 
 SCAN_FAILED = "Naukri scan failed"
 REFRESH_FAILED = "Naukri profile refresh failed"
+UPLOAD_FAILED = "Naukri resume upload failed"
 
 
 def _fail(message: str, code: int, notify: bool, title: str = SCAN_FAILED) -> int:
@@ -414,8 +465,8 @@ def main() -> int:
     parser.add_argument("--as-name", dest="as_name", metavar="FILENAME",
                         help="Upload under this filename - recruiters see it")
     parser.add_argument("--dry-run", action="store_true", dest="dry_run",
-                        help="With --upload-resume or --refresh-profile: show what would "
-                             "change, write nothing")
+                        help="With --upload-resume, --reupload-resume or --refresh-profile: "
+                             "show what would change, write nothing")
     action.add_argument("--refresh-profile", action="store_true", dest="refresh_profile",
                         help="Toggle one key skill and the headline's full stop, so the "
                              "profile reads as updated today")
@@ -424,13 +475,22 @@ def main() -> int:
                         help="Run --refresh-profile daily at TIME (default 09:30)")
     action.add_argument("--unschedule-refresh", action="store_true", dest="unschedule_refresh",
                         help="Remove the scheduled profile refresh")
+    action.add_argument("--reupload-resume", action="store_true", dest="reupload_resume",
+                        help="Download the resume attached to your Naukri profile and "
+                             "upload it again under the same name")
+    action.add_argument("--schedule-upload", dest="schedule_upload", nargs="?",
+                        const="09:30,14:30", metavar="TIMES",
+                        help="Run --reupload-resume daily at TIMES (default 09:30,14:30)")
+    action.add_argument("--unschedule-upload", action="store_true", dest="unschedule_upload",
+                        help="Remove the scheduled resume uploads")
     action.add_argument("--check", action="store_true", help="Print the effective config and exit")
     action.add_argument("--scan", action="store_true", help="Search, score and rank today's jobs")
     action.add_argument("--schedule", metavar="TIMES",
                         help="Scan daily at these times, e.g. 09:00,13:00,18:00 (systemd timer)")
     action.add_argument("--unschedule", action="store_true", help="Remove the scheduled scans")
     parser.add_argument("--notify", action="store_true",
-                        help="With --scan: desktop pop-up when it starts, finishes or fails")
+                        help="Desktop pop-ups: with --scan when it starts, finishes or "
+                             "fails; with --refresh-profile or --upload-resume when it fails")
 
     parser.add_argument("--source", choices=("local", "apify", "none"),
                         help="Override `source:` for this run; 'none' skips Naukri")
@@ -476,6 +536,10 @@ def main() -> int:
             return cmd_schedule(args.schedule_refresh, job="refresh")
         if args.unschedule_refresh:
             return cmd_unschedule("refresh")
+        if args.schedule_upload:
+            return cmd_schedule(args.schedule_upload, job="upload")
+        if args.unschedule_upload:
+            return cmd_unschedule("upload")
         if args.refresh_profile:
             return cmd_refresh(args.dry_run, args.headless, args.notify)
 
@@ -487,8 +551,12 @@ def main() -> int:
         if args.match:
             return cmd_match(args.match, args.cv, args.as_name, args.headless)
 
+        if args.reupload_resume:
+            return cmd_reupload_resume(args.dry_run, args.headless)
+
         if args.upload_resume:
-            return cmd_upload_resume(args.upload_resume, args.as_name, args.dry_run, args.headless)
+            return cmd_upload_resume(args.upload_resume, args.as_name, args.dry_run,
+                                     args.headless, args.notify)
 
         if args.extract:
             from screener import extract as extract_mod
@@ -501,7 +569,9 @@ def main() -> int:
         print("\n  Stopped.\n")
         return 130
     except Exception as exc:
-        title = REFRESH_FAILED if args.refresh_profile else SCAN_FAILED
+        title = (REFRESH_FAILED if args.refresh_profile
+                 else UPLOAD_FAILED if args.upload_resume or args.reupload_resume
+                 else SCAN_FAILED)
         if isinstance(exc, _expected_errors()):
             return _fail(str(exc), 2, args.notify, title)
         logging.getLogger("screener").exception("Unhandled error")

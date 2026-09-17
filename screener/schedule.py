@@ -1,4 +1,4 @@
-"""Run the scan - or the daily profile refresh - on a timer.
+"""Run the scan, the profile refresh or the resume re-upload on a timer.
 
 Linux gets a systemd *user* timer, Windows a Task Scheduler task. Either way,
 two things decide whether a scheduled run works at all:
@@ -35,6 +35,12 @@ JOBS = {
              "args": ["--scan", "--notify"], "jitter_minutes": 0},
     "refresh": {"unit": "naukri-refresh", "what": "Naukri profile refresh",
                 "args": ["--refresh-profile", "--headless", "--notify"], "jitter_minutes": 20},
+    # Downloads the resume attached to the profile and uploads it again under the
+    # same name, so no local file decides what goes up. A short window rather
+    # than the refresh's 20 minutes: it runs at times you chose, and it has to
+    # stay clear of the hourly refresh either side of it.
+    "upload": {"unit": "naukri-upload", "what": "Naukri resume re-upload",
+               "args": ["--reupload-resume", "--headless", "--notify"], "jitter_minutes": 5},
 }
 UNIT = JOBS["scan"]["unit"]
 UNIT_DIR = Path.home() / ".config" / "systemd" / "user"

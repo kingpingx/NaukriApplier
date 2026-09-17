@@ -265,14 +265,37 @@ The one command here that *writes* to your account. It replaces the attached
 resume and nothing else - it never touches the delete-resume control, so a
 failed upload leaves the old file in place rather than leaving you with none.
 
-Success is confirmed by reading back the filename Naukri displays and checking
-it changed, because the toast does not always fire and a silent no-op would
-otherwise look like a successful update. Format and size are checked against
-Naukri's own limits (doc/docx/rtf/pdf, 2 MB) before the browser opens.
+Success is confirmed by Naukri's own reply to the request that attaches the
+file, or by the filename it displays changing. The toast is not trusted: it
+does not always fire, and an upload that silently did nothing would otherwise
+look like it worked. Format and size are checked against Naukri's own limits
+(doc/docx/rtf/pdf, 2 MB) before the browser opens.
 
 Two things worth knowing before you run it: the filename is shown to recruiters,
 which is what `--as-name` is for, and the upload bumps your profile's freshness
 date - normally what you want, since recency drives recruiter search ranking.
+
+To keep that date current, upload the resume that is already on your profile
+again, on its own or on a schedule:
+
+```bash
+python main.py --reupload-resume --dry-run       # download it, upload nothing
+python main.py --reupload-resume                 # upload it again, same name
+python main.py --schedule-upload                 # do that at 09:30 and 14:30 every day
+python main.py --schedule-upload 10:00,16:00     # or at your own times
+python main.py --unschedule-upload
+```
+
+This downloads the resume attached to your profile and uploads that same file
+under the same name. No local file is involved, so if you replace your resume
+on Naukri's own site, the next run uploads the new one. Naukri serves the
+download as `Resume.pdf`, so it is saved under the name your profile shows
+before it goes back up. Otherwise recruiters would see `Resume.pdf`.
+
+Uploading the same file again leaves the card looking exactly as it did, so the
+check relies on Naukri's reply rather than the card. Each scheduled run starts
+within 5 minutes of the time you set, and `python main.py --check` shows how
+the last upload went.
 
 ### Check one opening before you apply
 
